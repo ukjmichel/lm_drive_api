@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import (
+    CustomTokenObtainPairView,
     CustomerListCreateAPIView,  # Combines list and create
     CustomerRetrieveUpdateDestroyAPIView,  # Combines retrieve, update, and delete
 )
@@ -13,4 +14,5 @@ urlpatterns = [
         CustomerRetrieveUpdateDestroyAPIView.as_view(),
         name="customer-detail",
     ),  # Retrieve, update, and delete a customer
+    path("token/", CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
 ]
