@@ -7,4 +7,5 @@ urlpatterns = [
     path(
         "api/", include("authentication.urls")
     ),  # Add this to include authentication URLs
+    path("api/", include("store.urls")),  # Add this to include authentication URLs
 ]
