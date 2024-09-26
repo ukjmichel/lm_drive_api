@@ -31,15 +31,12 @@ class Customer(models.Model):
 
     def clean(self):
         """Custom validation for the customer_id and other fields."""
-        # Ensure customer_id is valid
         if len(self.customer_id) != 10 or not self.customer_id.isdigit():
             raise ValidationError("Customer ID must be a 10-digit number.")
 
-        # Ensure email is provided
         if not self.email:
             raise ValidationError("Email cannot be empty.")
 
-        # Validate phone number format
         if self.phone and not re.match(r"^\+?1?\d{9,15}$", self.phone):
             raise ValidationError("Phone number must be in a valid format.")
 
@@ -50,6 +47,6 @@ class Customer(models.Model):
 
     @transaction.atomic
     def save(self, *args, **kwargs):
-        """Override save to ensure customer ID is unique and validate before saving."""
+        """Override save to ensure customer ID is unique."""
         self.full_clean()  # This calls clean() automatically
         super().save(*args, **kwargs)

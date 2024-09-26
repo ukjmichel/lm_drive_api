@@ -1,15 +1,26 @@
-# permissions.py
-from rest_framework import permissions
+from rest_framework.permissions import BasePermission, SAFE_METHODS
 
 
-class IsCustomerOrReadOnly(permissions.BasePermission):
+class IsOwnerOrAdmin(BasePermission):
     """
-    Custom permission to only allow customers to read and others to create/update/delete.
+    Allows access to the owner of the customer profile or staff (admins).
     """
 
     def has_permission(self, request, view):
-        # Allow read-only access to everyone
-        if request.method in permissions.SAFE_METHODS:
+        # Allow read access for all users
+        if request.method in SAFE_METHODS:
             return True
-        # Allow other methods only for authenticated users (not customers)
-        return request.user.is_authenticated and not request.user.is_customer
+        # Allow write access for the owner or staff
+        return request.user.is_staff or (
+            hasattr(request.user, "customer")
+            and request.user.customer.pk == view.get_object().pk
+        )
+
+
+class IsAdminUser(BasePermission):
+    """
+    Allows access to staff (admin) users only, regardless of JWT token.
+    """
+
+    def has_permission(self, request, view):
+        return request.user.is_staff

@@ -1,45 +1,29 @@
 from rest_framework import generics, status
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
-from .models import Customer
-from .serializers import CustomTokenObtainPairSerializer, CustomerSerializer
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.response import Response
+from .models import Customer
+from .serializers import CustomTokenObtainPairSerializer, CustomerSerializer
+from .permissions import IsOwnerOrAdmin, IsAdminUser
 
 
 class CustomerListCreateAPIView(generics.ListCreateAPIView):
     serializer_class = CustomerSerializer
-    permission_classes = [IsAuthenticated]  # Ensure the user is authenticated
+    permission_classes = [IsAdminUser]  # Ensure only admin can access
 
     def get_queryset(self):
-        # Allow admin to see all customers, regular users see their own customers
-        if self.request.user.is_staff:  # Check if the user is an admin
-            return Customer.objects.all()  # Admins can see all customers
-        return Customer.objects.filter(
-            user=self.request.user
-        )  # Regular users see their own customers
-
-    def get(self, request, *args, **kwargs):
-        return super().get(
-            request, *args, **kwargs
-        )  # Handle GET request for listing customers
-
-    def post(self, request, *args, **kwargs):
-        return super().post(
-            request, *args, **kwargs
-        )  # Handle POST request for creating a customer
+        # Only admins can see all customers
+        return Customer.objects.all()
 
     def perform_create(self, serializer):
-        # Associate the new customer with the authenticated user
-        serializer.save(
-            user=self.request.user
-        )  # Save the new customer instance with the user
+        # No need to associate with the user since only admins can create customers
+        serializer.save()  # Save the new customer instance without user association
 
 
 class CustomerRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = CustomerSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsOwnerOrAdmin]
 
     def get_queryset(self):
         # Allow admin to see all customers, regular users see their own customers
