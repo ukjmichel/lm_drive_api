@@ -1,20 +1,15 @@
 from rest_framework.permissions import BasePermission, SAFE_METHODS
 
 
-class IsOwnerOrAdmin(BasePermission):
-    """
-    Allows access to the owner of the customer profile or staff (admins).
-    """
-
+class IsCustomerOrAdmin(BasePermission):
     def has_permission(self, request, view):
-        # Allow read access for all users
-        if request.method in SAFE_METHODS:
+        if request.user.is_staff:
             return True
-        # Allow write access for the owner or staff
-        return request.user.is_staff or (
-            hasattr(request.user, "customer")
-            and request.user.customer.pk == view.get_object().pk
-        )
+
+        if request.method in ["POST", "GET"]:
+            return True  # Allow access for these methods generally
+
+        return False
 
 
 class IsAdminUser(BasePermission):
@@ -23,4 +18,11 @@ class IsAdminUser(BasePermission):
     """
 
     def has_permission(self, request, view):
+        return request.user.is_staff
+
+
+class IsStaffOrReadOnly(BasePermission):
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return True
         return request.user.is_staff

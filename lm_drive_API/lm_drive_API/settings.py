@@ -56,6 +56,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
 ]
 
 ROOT_URLCONF = "lm_drive_API.urls"
@@ -139,3 +140,34 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
 }
+
+CORS_ORIGIN_ALLOW_ALL = (
+    True  # Set to True if you want to allow requests from any origin
+)
+
+CORS_ORIGIN_WHITELIST = [
+    "http://127.0.0.1:5173",  # Replace with your allowed origins
+]
+
+CORS_ALLOW_CREDENTIALS = True  # Allow credentials (cookies, authorization headers)
+
+CORS_ALLOW_METHODS = [
+    "DELETE",
+    "GET",
+    "HEAD",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+]
+
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-requested-with",
+]

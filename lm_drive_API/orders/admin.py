@@ -15,7 +15,7 @@ class OrderAdmin(admin.ModelAdmin):
         "customer",
         "status",
         "total_amount",
-        "created_at",
+        "order_date",
     ]  # Fields to display in list view
     search_fields = [
         "order_id",

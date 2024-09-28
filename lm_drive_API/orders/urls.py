@@ -1,16 +1,23 @@
 from django.urls import path
 from . import views  # Import views from your orders.views.py
+from .views import (
+    OrderListCreateView,
+    OrderRetrieveUpdateDestroyView,
+    AddOrderItemView,
+)
 
 urlpatterns = [
     path(
-        "", views.OrderListCreateView.as_view(), name="order-list"
+        "", OrderListCreateView.as_view(), name="order-list-create"
     ),  # List and create orders
     path(
         "<str:order_id>/",
-        views.OrderRetrieveUpdateDestroyView.as_view(),
+        OrderRetrieveUpdateDestroyView.as_view(),
         name="order-detail",
     ),  # Retrieve, update, delete orders
     path(
-        "<str:order_id>/items/", views.OrderItemListView.as_view(), name="order-items"
+        "<str:order_id>/items/",
+        AddOrderItemView.as_view(),
+        name="add-order-item",
     ),  # Retrieve order items
 ]

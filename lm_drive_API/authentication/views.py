@@ -5,25 +5,30 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.response import Response
 from .models import Customer
 from .serializers import CustomTokenObtainPairSerializer, CustomerSerializer
-from .permissions import IsOwnerOrAdmin, IsAdminUser
+from .permissions import IsCustomerOrAdmin
 
 
 class CustomerListCreateAPIView(generics.ListCreateAPIView):
     serializer_class = CustomerSerializer
-    permission_classes = [IsAdminUser]  # Ensure only admin can access
+    permission_classes = [IsCustomerOrAdmin]  # Ensure only authorized users can access
 
     def get_queryset(self):
-        # Only admins can see all customers
-        return Customer.objects.all()
+        # Only admins can see all customers, while regular users can see their own information
+        if self.request.user.is_staff:
+            return Customer.objects.all()  # Admins see all customers
+        return Customer.objects.filter(
+            user=self.request.user
+        )  # Customers see their own information
 
     def perform_create(self, serializer):
-        # No need to associate with the user since only admins can create customers
-        serializer.save()  # Save the new customer instance without user association
+        # You may want to associate the customer with the logged-in user
+        # if necessary, but assuming admins create customers without association
+        serializer.save()  # Save the new customer instance
 
 
 class CustomerRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = CustomerSerializer
-    permission_classes = [IsOwnerOrAdmin]
+    permission_classes = [IsCustomerOrAdmin]
 
     def get_queryset(self):
         # Allow admin to see all customers, regular users see their own customers

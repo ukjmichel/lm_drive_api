@@ -6,7 +6,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 class UserSerializer(serializers.ModelSerializer):
     """
-    Serializer for User model to include username and email.
+    Serializer for User model to include username and password.
     """
 
     password = serializers.CharField(
@@ -15,16 +15,13 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = [
-            "username",
-            "password",
-        ]  # Expose username, email, and password fields
+        fields = ["username", "password"]  # Expose username and password fields
 
     def create(self, validated_data):
         password = validated_data.pop("password")  # Extract password
         user = User(**validated_data)  # Create user instance without saving yet
         user.set_password(password)  # Set password
-        user.save()  # Now save the user
+        user.save()  # Save the user
         return user
 
 
@@ -35,15 +32,9 @@ class CustomerSerializer(serializers.ModelSerializer):
         model = Customer
         fields = [
             "customer_id",
-            "user",  # Exposes the nested user data (username, email)
-            "first_name",
-            "last_name",
+            "user",
             "email",
-            "phone",
-            "address",
-            "city",
-            "postal_code",
-        ]
+        ]  # Expose the nested user data and email
         read_only_fields = ["customer_id"]  # customer_id is read-only
 
     def create(self, validated_data):
@@ -53,12 +44,18 @@ class CustomerSerializer(serializers.ModelSerializer):
         if "password" not in user_data:
             raise serializers.ValidationError({"password": "This field is required."})
 
-        email = user_data.get("email")
+        email = validated_data.get("email")  # Get email from validated data
 
-        # Check if a user with this email already exists
-        if User.objects.filter(email=email).exists():
+        # Check if a user with this username already exists
+        if User.objects.filter(username=user_data["username"]).exists():
             raise serializers.ValidationError(
-                {"email": "A user with this email already exists."}
+                {"username": "A user with this username already exists."}
+            )
+
+        # Check if a customer with this email already exists
+        if Customer.objects.filter(email=email).exists():
+            raise serializers.ValidationError(
+                {"email": "A customer with this email already exists."}
             )
 
         # Create the User instance using the nested serializer
@@ -66,8 +63,8 @@ class CustomerSerializer(serializers.ModelSerializer):
         user_serializer.is_valid(raise_exception=True)  # Validate user data
         user = user_serializer.save()  # Create user
 
-        # Create the Customer instance linked to the User
-        customer = Customer.objects.create(user=user, **validated_data)
+        # Create the Customer instance linked to the User, passing the email
+        customer = Customer.objects.create(user=user, email=email)
 
         return customer
 
