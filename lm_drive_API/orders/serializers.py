@@ -2,16 +2,20 @@ from rest_framework import serializers
 from .models import Order, OrderItem
 from authentication.models import Customer
 from rest_framework.exceptions import ValidationError
+from store.models import Product
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
+    product_id = serializers.CharField(source="product.product_id")
+
     class Meta:
         model = OrderItem
-        fields = "__all__"
-        read_only_fields = ["total"]  # Make total read-only, calculated on save
+        fields = ["product_id", "quantity"]
 
-
-from rest_framework.exceptions import ValidationError
+    def validate_product_id(self, value):
+        if not Product.objects.filter(product_id=value).exists():
+            raise serializers.ValidationError("Product with this ID does not exist.")
+        return value
 
 
 class OrderSerializer(serializers.ModelSerializer):

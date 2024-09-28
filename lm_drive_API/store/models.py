@@ -13,8 +13,9 @@ class Category(models.Model):
 
 class Product(models.Model):
     product_id = models.CharField(
-        max_length=100, unique=True
+        max_length=20, unique=True
     )  # Unique product identifier
+    product_name = models.CharField(max_length=100)
     upc = models.CharField(
         max_length=12, unique=True, blank=True
     )  # UPC code for the product
@@ -30,4 +31,5 @@ class Product(models.Model):
     )  # Optional image field
 
     def __str__(self):
-        return f"Product ID: {self.product_id}, UPC: {self.upc}, Brand: {self.brand}, Category: {self.category.name}"
+        # Improved string representation with fallback for optional fields
+        return f"Product ID: {self.product_id}, Name: {self.product_name}, Brand: {self.brand}, Category: {self.category.name}"
