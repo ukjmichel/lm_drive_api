@@ -7,10 +7,11 @@ from store.models import Product
 
 class OrderItemSerializer(serializers.ModelSerializer):
     product_id = serializers.CharField(source="product.product_id")
+    product_name = serializers.CharField(source="product.product_name")
 
     class Meta:
         model = OrderItem
-        fields = ["product_id", "quantity"]
+        fields = ["product_id", "product_name", "quantity"]
 
     def validate_product_id(self, value):
         if not Product.objects.filter(product_id=value).exists():

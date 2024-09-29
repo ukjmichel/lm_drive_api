@@ -27,6 +27,12 @@ class Order(models.Model):
     def __str__(self):
         return f"Order {self.order_id} for {self.customer}"
 
+    def update_total_amount(self):
+        # Recalculate the total amount for the order by summing the totals of all items
+        total = sum(item.total for item in self.items.all())
+        self.total_amount = total
+        self.save()  # Save the updated total amount
+
     def save(self, *args, **kwargs):
         """Override save to calculate total_amount based on related OrderItems."""
         super().save(*args, **kwargs)  # Save first to ensure order exists
@@ -55,3 +61,11 @@ class OrderItem(models.Model):
         # Calculate total based on price and quantity before saving
         self.total = self.price * self.quantity
         super().save(*args, **kwargs)
+
+        # After saving the order item, update the order's total amount
+        self.order.update_total_amount()
+
+    def delete(self, *args, **kwargs):
+        # Before deleting the order item, update the order's total amount
+        super().delete(*args, **kwargs)
+        self.order.update_total_amount()
