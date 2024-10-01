@@ -1,19 +1,28 @@
 from rest_framework import serializers
 from .models import Order, OrderItem
 from authentication.models import Customer
+from store.serializers import ProductSerializer  # Assuming you have a ProductSerializer
 from rest_framework.exceptions import ValidationError
 from store.models import Product
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
-    product_id = serializers.CharField(source="product.product_id")
-    product_name = serializers.CharField(source="product.product_name")
+    product = ProductSerializer(
+        read_only=True
+    )  # Use ProductSerializer for product details
 
     class Meta:
         model = OrderItem
-        fields = ["product_id", "product_name", "quantity"]
+        fields = [
+            "id",
+            "product",  # Adjusted to serialize the entire product
+            "quantity",
+            "price",
+        ]
 
     def validate_product_id(self, value):
+        if value < 0:
+            raise serializers.ValidationError("Quantity cannot be negative.")
         if not Product.objects.filter(product_id=value).exists():
             raise serializers.ValidationError("Product with this ID does not exist.")
         return value
@@ -73,3 +82,78 @@ class OrderSerializer(serializers.ModelSerializer):
             order.save(update_fields=["total_amount"])
 
         return order
+
+    def update(self, instance, validated_data):
+        items_data = validated_data.pop("items", None)
+
+        # Update the order fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        instance.save()
+
+        # Handle updating the items if provided
+        if items_data is not None:
+            # Update existing order items or create new ones
+            for item_data in items_data:
+                order_item_id = item_data.get("id", None)
+                if order_item_id:  # Update existing order item
+                    order_item = get_object_or_404(
+                        OrderItem, id=order_item_id, order=instance
+                    )
+                    for attr, value in item_data.items():
+                        setattr(order_item, attr, value)
+                    order_item.save()
+                else:  # Create a new order item
+                    OrderItem.objects.create(order=instance, **item_data)
+
+        return instance
+
+
+class OrderListSerializer(serializers.ModelSerializer):
+    customer_id = serializers.CharField(
+        source="order.customer.customer_id", read_only=True
+    )
+
+    class Meta:
+        model = Order
+        fields = [
+            "order_id",
+            "order_date",
+            "total_amount",
+            "status",
+            "customer_id",
+        ]  # Include customer_id
+
+    def get_customer_id(self, obj):
+        return obj.customer.customer_id  # Adjust based on your customer field name
+
+
+from rest_framework import serializers
+from .models import OrderItem
+
+
+class OrderItemUpdateSerializer(serializers.ModelSerializer):
+    customer_id = serializers.CharField(
+        source="order.customer.customer_id", read_only=True
+    )
+    name = serializers.CharField(
+        source="product.name", read_only=True
+    )  # Assuming you have a name field in Product
+
+    class Meta:
+        model = OrderItem
+        fields = ["id", "name", "quantity", "customer_id"]
+
+    def update(self, instance, validated_data):
+        # Update only the quantity field
+        instance.quantity = validated_data.get("quantity", instance.quantity)
+
+        # Validate that quantity is not negative
+        if instance.quantity < 0:
+            raise serializers.ValidationError(
+                {"quantity": "Quantity cannot be negative."}
+            )
+
+        instance.save()
+        return instance

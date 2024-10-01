@@ -10,11 +10,16 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
+import os
 from pathlib import Path
+from datetime import timedelta
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+MEDIA_URL = "media/"
+MEDIA_ROOT = os.path.join(BASE_DIR, "media")  # Adjust the path as necessar
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
@@ -171,3 +176,19 @@ CORS_ALLOW_HEADERS = [
     "user-agent",
     "x-requested-with",
 ]
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),  # Example: 5 minutes
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),  # Example: 1 day
+    "ROTATE_REFRESH_TOKENS": True,  # Optional: to rotate tokens
+}
+
+
+# Custom JWT Payload Handler
+def jwt_payload_handler(user):
+    return {
+        "id": user.id,
+        "username": user.username,
+        "is_staff": user.is_staff,
+        "is_superuser": user.is_superuser,
+    }

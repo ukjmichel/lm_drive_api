@@ -1,8 +1,9 @@
 from django.urls import path
 from .views import (
     OrderListCreateView,
-    OrderRetrieveUpdateDestroyView,
+    OrderDetailView,
     AddOrderItemView,
+    OrderItemRetrieveUpdateDestroyView,
 )
 
 urlpatterns = [
@@ -10,13 +11,16 @@ urlpatterns = [
         "", OrderListCreateView.as_view(), name="order-list-create"
     ),  # List and create orders
     path(
-        "<str:order_id>/",
-        OrderRetrieveUpdateDestroyView.as_view(),
-        name="order-detail",
-    ),  # Retrieve, update, and delete an order
+        "<str:order_id>/", OrderDetailView.as_view(), name="order-detail"
+    ),  # Retrieve, update, and delete an order using order_id
     path(
-        "<str:order_id>/items/",
+        "<str:order_id>/add-item/",
         AddOrderItemView.as_view(),
-        name="add-order-item",
-    ),  # Add an item to an order
+        name="add-item-to-order",
+    ),
+    path(
+        "<str:order_id>/item/<int:id>/",
+        OrderItemRetrieveUpdateDestroyView.as_view(),
+        name="order-item-update",
+    ),
 ]

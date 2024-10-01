@@ -12,17 +12,18 @@ class IsCustomerOrAdmin(BasePermission):
         return False
 
 
-class IsAdminUser(BasePermission):
-    """
-    Allows access to staff (admin) users only, regardless of JWT token.
-    """
-
-    def has_permission(self, request, view):
-        return request.user.is_staff
-
-
 class IsStaffOrReadOnly(BasePermission):
+    """
+    Custom permission to only allow staff members to edit an object.
+    Non-staff users can read the object.
+    """
+
     def has_permission(self, request, view):
+        # Allow all read operations (GET, HEAD, OPTIONS) for everyone
         if request.method in SAFE_METHODS:
             return True
+        # Allow write operations only for staff
         return request.user.is_staff
+
+
+

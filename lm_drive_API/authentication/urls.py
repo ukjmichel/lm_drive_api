@@ -1,4 +1,5 @@
 from django.urls import path
+from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
     CustomTokenObtainPairView,
     CustomerListCreateAPIView,  # Combines list and create
@@ -15,4 +16,7 @@ urlpatterns = [
         name="customer-detail",
     ),  # Retrieve, update, and delete a customer
     path("token/", CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path(
+        "token/refresh/", TokenRefreshView.as_view(), name="token_refresh"
+    ),  # Token refresh view
 ]

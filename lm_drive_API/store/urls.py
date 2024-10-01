@@ -4,6 +4,8 @@ from .views import (
     ProductRetrieveUpdateDestroyAPIView,
     CategoryListCreateAPIView,
     CategoryRetrieveUpdateDestroyAPIView,
+    SubCategoryListCreateAPIView,
+    SubCategoryRetrieveUpdateDestroyAPIView,
 )
 
 urlpatterns = [
@@ -20,5 +22,15 @@ urlpatterns = [
         "categories/<str:pk>/",
         CategoryRetrieveUpdateDestroyAPIView.as_view(),
         name="category-detail",
+    ),
+    path(
+        "subcategories/",
+        SubCategoryListCreateAPIView.as_view(),
+        name="subcategory-list-create",
+    ),
+    path(
+        "subcategories/<str:pk>/",
+        SubCategoryRetrieveUpdateDestroyAPIView.as_view(),
+        name="subcategory-detail",
     ),
 ]
