@@ -51,10 +51,13 @@ class CustomerRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
-    permission_classes = [AllowAny]  # Allow any user to access this view
+    permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        tokens = serializer.validated_data
+        tokens = (
+            serializer.validated_data
+        )  # tokens will include access and refresh tokens
+
         return Response(tokens, status=status.HTTP_200_OK)

@@ -73,6 +73,21 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
-        # Add custom claims
+
+        # Add custom claims to the token
         token["username"] = user.username
+        token["is_admin"] = user.is_superuser  # Assuming is_superuser means admin
+        token["is_staff"] = user.is_staff  # Optional: add is_staff if needed
+
         return token
+
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        # Add extra responses here if needed, for example, including user info in the response
+        data["user"] = {
+            "id": self.user.id,
+            "username": self.user.username,
+            "is_admin": self.user.is_superuser,
+            "is_staff": self.user.is_staff,
+        }
+        return data

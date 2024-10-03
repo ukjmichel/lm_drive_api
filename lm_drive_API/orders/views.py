@@ -76,15 +76,26 @@ class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def perform_update(self, serializer):
         order = self.get_object()  # Get the current order instance
+        new_status = serializer.validated_data.get(
+            "status"
+        )  # Get the status the user is trying to set
 
+        # Check if the user is not staff and also not the owner of the order
         if not self.request.user.is_staff and order.customer.user != self.request.user:
             raise PermissionDenied("You do not have permission to update this order.")
 
-        if order.status != "pending":
-            raise PermissionDenied(
-                "You cannot update this order because it is not pending."
-            )
+        # If the user is not staff, ensure the order is still pending and status is set to 'confirmed'
+        if not self.request.user.is_staff:
+            if order.status != "pending":
+                raise PermissionDenied(
+                    "You cannot update this order because it is not pending."
+                )
+            if new_status != "confirmed":
+                raise PermissionDenied(
+                    "Non-staff users can only set the status to 'confirmed'."
+                )
 
+        # Staff can update the order freely, without these restrictions
         serializer.save()  # Proceed with the update
 
     def perform_destroy(self, instance):
