@@ -9,21 +9,14 @@ from .permissions import IsCustomerOrAdmin
 
 
 class CustomerListCreateAPIView(generics.ListCreateAPIView):
+    queryset = Customer.objects.all()
     serializer_class = CustomerSerializer
-    permission_classes = [IsCustomerOrAdmin]  # Ensure only authorized users can access
-
-    def get_queryset(self):
-        # Only admins can see all customers, while regular users can see their own information
-        if self.request.user.is_staff:
-            return Customer.objects.all()  # Admins see all customers
-        return Customer.objects.filter(
-            user=self.request.user
-        )  # Customers see their own information
+    permission_classes = [
+        AllowAny
+    ]  # Allow access to any user, including unauthenticated users
 
     def perform_create(self, serializer):
-        # You may want to associate the customer with the logged-in user
-        # if necessary, but assuming admins create customers without association
-        serializer.save()  # Save the new customer instance
+        serializer.save()
 
 
 class CustomerRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):

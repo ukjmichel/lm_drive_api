@@ -26,7 +26,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class CustomerSerializer(serializers.ModelSerializer):
-    user = UserSerializer()  # Nested serializer to create a user
+    user = UserSerializer()  # Nested serializer to create/update a user
 
     class Meta:
         model = Customer
@@ -67,6 +67,25 @@ class CustomerSerializer(serializers.ModelSerializer):
         customer = Customer.objects.create(user=user, email=email)
 
         return customer
+
+    def update(self, instance, validated_data):
+        user_data = validated_data.pop("user", None)  # Extract user data, if provided
+        user = (
+            instance.user
+        )  # Get the current user instance associated with the customer
+
+        # Update the User fields if user data is present
+        if user_data:
+            user.username = user_data.get("username", user.username)  # Update username
+            if "password" in user_data:
+                user.set_password(user_data["password"])  # Update password
+            user.save()
+
+        # Update the Customer fields
+        instance.email = validated_data.get("email", instance.email)
+        instance.save()
+
+        return instance
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):

@@ -6,7 +6,7 @@ class IsCustomerOrAdmin(BasePermission):
         if request.user.is_staff:
             return True
 
-        if request.method in ["POST", "GET"]:
+        if request.method in ["POST", "GET", "PATCH"]:
             return True  # Allow access for these methods generally
 
         return False
@@ -24,6 +24,3 @@ class IsStaffOrReadOnly(BasePermission):
             return True
         # Allow write operations only for staff
         return request.user.is_staff
-
-
-

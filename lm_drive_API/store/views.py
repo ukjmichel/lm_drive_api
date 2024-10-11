@@ -1,13 +1,15 @@
-from django.shortcuts import render
-from rest_framework import generics, status
-from rest_framework.response import Response
+from rest_framework import generics
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
-from .models import Product, Category, SubCategory
-from .serializers import ProductSerializer, CategorySerializer, SubCategorySerializer
+from .models import Product, Category, SubCategory, Stock
+from .serializers import (
+    ProductSerializer,
+    CategorySerializer,
+    SubCategorySerializer,
+    StockSerializer,
+)
 from authentication.permissions import IsStaffOrReadOnly
 import logging
-
-
 
 
 class CategoryListCreateAPIView(generics.ListCreateAPIView):
@@ -124,23 +126,77 @@ class ProductRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView)
         # Get the existing product instance
         product_instance = self.get_object()
 
+        # Extract product_id and upc from the serializer validated data
         product_id = serializer.validated_data.get(
             "product_id", product_instance.product_id
         )
         upc = serializer.validated_data.get("upc", product_instance.upc)
 
-        # Check if another product with the same product_id or UPC already exists
+        # Check if another product with the same product_id already exists
         if (
             Product.objects.filter(product_id=product_id)
-            .exclude(id=product_instance.id)
+            .exclude(product_id=product_instance.product_id)
             .exists()
         ):
             raise ValidationError(
                 f"Product with product_id '{product_id}' already exists."
             )
 
-        if Product.objects.filter(upc=upc).exclude(id=product_instance.id).exists():
+        # Check if another product with the same UPC already exists
+        if (
+            Product.objects.filter(upc=upc)
+            .exclude(product_id=product_instance.product_id)
+            .exists()
+        ):
             raise ValidationError(f"Product with UPC '{upc}' already exists.")
 
         # Save the serializer (this will update the product)
+        serializer.save()
+
+
+class StockListCreateAPIView(generics.ListCreateAPIView):
+    """
+    API view to retrieve a list of stocks and create a new stock record.
+    """
+
+    queryset = Stock.objects.all()
+    serializer_class = StockSerializer
+    permission_classes = [IsAuthenticated]  # Change to your custom permission if needed
+
+    def perform_create(self, serializer):
+        product = serializer.validated_data.get("product")
+        store = serializer.validated_data.get("store")
+
+        # Check if the stock record already exists for the store and product
+        if Stock.objects.filter(product=product, store=store).exists():
+            raise ValidationError(
+                f"Stock record for product '{product.product_name}' at store '{store.name}' already exists."
+            )
+
+        # Save the serializer (this will create the store stock)
+        serializer.save()
+
+
+class StockRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    API view to retrieve, update, or delete a stock record.
+    """
+
+    queryset = Stock.objects.all()
+    serializer_class = StockSerializer
+    permission_classes = [IsAuthenticated]  # Change to your custom permission if needed
+
+    def perform_update(self, serializer):
+        product = serializer.validated_data.get("product")
+        store = serializer.validated_data.get("store")
+
+        # Check if the stock record exists for the store and product before updating
+        stock_instance = self.get_object()
+        if stock_instance.product != product or stock_instance.store != store:
+            if Stock.objects.filter(product=product, store=store).exists():
+                raise ValidationError(
+                    f"Stock record for product '{product.product_name}' at store '{store.name}' already exists."
+                )
+
+        # Save the serializer (this will update the store stock)
         serializer.save()

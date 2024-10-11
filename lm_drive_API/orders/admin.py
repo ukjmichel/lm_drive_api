@@ -9,7 +9,16 @@ class OrderItemInline(admin.TabularInline):
 
 
 class OrderAdmin(admin.ModelAdmin):
-    list_display = ("order_id", "customer", "order_date", "total_amount", "status")
+    list_display = (
+        "order_id",
+        "customer",
+        "order_date",
+        "total_amount",
+        "status",
+        "update_date",
+        "confirmed_date",
+        "fulfilled_date",
+    )  # Added update_date for display
     list_filter = ("status", "customer", "order_date")
     search_fields = (
         "order_id",
@@ -17,7 +26,12 @@ class OrderAdmin(admin.ModelAdmin):
     )
     ordering = ("-order_date",)
     inlines = [OrderItemInline]  # Show OrderItems inline in the Order admin form
-    readonly_fields = ("total_amount",)  # Make total_amount read-only
+    readonly_fields = (
+        "total_amount",
+        "update_date",
+        "confirmed_date",
+        "fulfilled_date",
+    )  # Make total_amount and update_date read-only
 
 
 class OrderItemAdmin(admin.ModelAdmin):
