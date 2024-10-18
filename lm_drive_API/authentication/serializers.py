@@ -27,6 +27,9 @@ class UserSerializer(serializers.ModelSerializer):
 
 class CustomerSerializer(serializers.ModelSerializer):
     user = UserSerializer()  # Nested serializer to create/update a user
+    stripe_customer_id = serializers.CharField(
+        read_only=True
+    )  # Add stripe_customer_id as read-only
 
     class Meta:
         model = Customer
@@ -34,8 +37,9 @@ class CustomerSerializer(serializers.ModelSerializer):
             "customer_id",
             "user",
             "email",
-        ]  # Expose the nested user data and email
-        read_only_fields = ["customer_id"]  # customer_id is read-only
+            "stripe_customer_id",  # Include Stripe ID only for staff
+        ]
+        read_only_fields = ["customer_id", "stripe_customer_id"]  # Mark as read-only
 
     def create(self, validated_data):
         user_data = validated_data.pop("user")  # Extract user data

@@ -16,6 +16,12 @@ class Customer(models.Model):
     customer_id = models.CharField(
         max_length=10, unique=True, default=generate_unique_customer_id
     )
+    stripe_customer_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        unique=True,  # Allow nulls for customers not yet created in Stripe
+    )
     user = models.OneToOneField("auth.User", on_delete=models.CASCADE)
     email = models.EmailField(unique=True)  # Ensure email is unique
 

@@ -13,6 +13,15 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 import os
 from pathlib import Path
 from datetime import timedelta
+from dotenv import load_dotenv
+from decouple import config
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Stripe
+STRIPE_PUBLISHABLE_KEY = config("STRIPE_PUBLISHABLE_KEY")
+STRIPE_SECRET_KEY = config("STRIPE_SECRET_KEY")
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -51,6 +60,7 @@ INSTALLED_APPS = [
     "authentication",
     "store",
     "orders",
+    "payments",
 ]
 
 MIDDLEWARE = [

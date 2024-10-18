@@ -41,6 +41,16 @@ class CustomerRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView
         except Customer.DoesNotExist:
             raise NotFound(detail="Customer not found.")
 
+    def get_serializer(self, *args, **kwargs):
+        # Use the super method to get the serializer
+        serializer = super().get_serializer(*args, **kwargs)
+
+        # If the user is not a staff member, exclude the stripe_customer_id
+        if not self.request.user.is_staff:
+            serializer.fields.pop("stripe_customer_id", None)
+
+        return serializer
+
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
@@ -54,3 +64,4 @@ class CustomTokenObtainPairView(TokenObtainPairView):
         )  # tokens will include access and refresh tokens
 
         return Response(tokens, status=status.HTTP_200_OK)
+    
