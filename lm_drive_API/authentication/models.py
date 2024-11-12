@@ -34,6 +34,13 @@ class Customer(models.Model):
         if not self.email:
             raise ValidationError("Email cannot be empty.")
 
+        # Validate username length
+        username = self.user.username
+        if len(username) < 4:
+            raise ValidationError("Username must be at least 4 characters long.")
+        if len(username) > 20:
+            raise ValidationError("Username cannot be more than 20 characters long.")
+
     class Meta:
         verbose_name = "Customer"
         verbose_name_plural = "Customers"

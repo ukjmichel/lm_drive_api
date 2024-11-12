@@ -1,22 +1,18 @@
 from django.contrib import admin
-from .models import (
-    Product,
-    Category,
-    SubCategory,
-    Stock,
-    Store,  # Ensure you import the Store model
-)
 
 
-# Define an inline for SubCategory in Product
+from .models import Product, Category, SubCategory, Stock, Store, Packaging, Brand
+
+
+# Inline for SubCategory in Product
 class SubCategoryInline(admin.TabularInline):
-    model = Product.subcategories.through  # Adjusted to the ManyToMany relationship
+    model = Product.subcategories.through  # ManyToMany relationship
     extra = 1  # Number of empty forms to display
     verbose_name = "Subcategory"
     verbose_name_plural = "Subcategories"
 
 
-# Define an inline for Stock in Product
+# Inline for Stock in Product
 class StockInline(admin.TabularInline):
     model = Stock  # Use the Stock model to display stock information
     extra = 1  # Number of empty forms to display
@@ -29,6 +25,15 @@ class StockInline(admin.TabularInline):
     verbose_name_plural = "Stock Entries"
 
 
+# Packaging Inline for Product
+class PackagingInline(admin.TabularInline):
+    model = Packaging  # Allows for packaging management within Product
+    extra = 1
+    verbose_name = "Packaging Entry"
+    verbose_name_plural = "Packaging Entries"
+
+
+# Category Admin
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
     list_display = ("id", "name")
@@ -36,6 +41,7 @@ class CategoryAdmin(admin.ModelAdmin):
     ordering = ("name",)
 
 
+# SubCategory Admin
 @admin.register(SubCategory)
 class SubCategoryAdmin(admin.ModelAdmin):
     list_display = ("id", "name")
@@ -43,6 +49,14 @@ class SubCategoryAdmin(admin.ModelAdmin):
     ordering = ("name",)
 
 
+@admin.register(Brand)
+class BrandAdmin(admin.ModelAdmin):
+    list_display = ("id", "name")  # Display brand ID and name
+    search_fields = ("name",)  # Enable search by brand name
+    ordering = ("name",)  # Sort by brand name
+
+
+# Product Admin
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     list_display = (
@@ -51,6 +65,7 @@ class ProductAdmin(admin.ModelAdmin):
         "price",
         "brand",
         "category",  # Display the category
+        "packaging_display",  # Display packaging as quantity x value
         "crèche_stock",  # Stock for Crêche
         "villefranche_stock",  # Stock for Villefranche
         "total_stock",  # Total stock across all stores
@@ -67,14 +82,15 @@ class ProductAdmin(admin.ModelAdmin):
         StockInline,
     ]
 
+    # Define stock for specific stores
     def crèche_stock(self, obj):
         """Return the stock quantity for the Crêche store."""
-        stock = obj.stocks.filter(store__id="CRE71780").first()  # Filter by store name
+        stock = obj.stocks.filter(store__id="CRE71780").first()
         return stock.quantity_in_stock if stock else 0
 
     def villefranche_stock(self, obj):
         """Return the stock quantity for the Villefranche store."""
-        stock = obj.stocks.filter(store__id="VIL69400").first()  # Filter by store name
+        stock = obj.stocks.filter(store__id="VIL69400").first()
         return stock.quantity_in_stock if stock else 0
 
     def total_stock(self, obj):
@@ -82,15 +98,21 @@ class ProductAdmin(admin.ModelAdmin):
         total = sum(stock.quantity_in_stock for stock in obj.stocks.all())
         return total
 
-    crèche_stock.short_description = "Crêche"  # Set short description for Crêche stock
-    villefranche_stock.short_description = (
-        "Villefranche"  # Set short description for Villefranche stock
-    )
-    total_stock.short_description = (
-        "Total Stock"  # Set short description for total stock
-    )
+    def packaging_display(self, obj):
+        """Return the packaging formatted as 'quantity x value'."""
+        if obj.packaging:
+            return (
+                f"{obj.packaging.packaging_quantity} x {obj.packaging.packaging_value}"
+            )
+        return "N/A"
+
+    packaging_display.short_description = "Packaging"
+    crèche_stock.short_description = "Crêche"
+    villefranche_stock.short_description = "Villefranche"
+    total_stock.short_description = "Total Stock"
 
 
+# Stock Admin
 @admin.register(Stock)
 class StockAdmin(admin.ModelAdmin):
     list_display = (
@@ -101,27 +123,42 @@ class StockAdmin(admin.ModelAdmin):
     )
     ordering = ("store",)
     search_fields = (
-        "store__name",  # Search by store name directly
+        "store__name",  # Search by store name
         "product__product_name",  # Search by product name
-        "product__brand",  # Search by brand through product
+        "product__brand",  # Search by brand
     )
     list_filter = (
         "store",  # Filter by store
         "product__brand",  # Filter by brand through product
-        "product__category",  # Filter by category through product
-        "product__subcategories",  # Filter by subcategories through product
+        "product__category",  # Filter by category
+        "product__subcategories",  # Filter by subcategories
     )
 
 
-@admin.register(Store)  # Register the Store model
+# Store Admin
+@admin.register(Store)
 class StoreAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "name",
-        "address",  # Optional: Display address if needed
-        "city",  # Optional: Display city if needed
-        "postal_code",  # Optional: Display postal code if needed
-        "phone_number",  # Optional: Display phone number if needed
-    )  # Adjust this as necessary based on your Store model fields
-    search_fields = ("name",)  # Allow searching by store name
+        "address",  # Display address if needed
+        "city",  # Display city if needed
+        "postal_code",  # Display postal code
+        "phone_number",  # Display phone number
+    )
+    search_fields = ("name",)  # Search by store name
     ordering = ("name",)  # Order by store name
+
+
+# Packaging Admin
+@admin.register(Packaging)
+class PackagingAdmin(admin.ModelAdmin):
+    list_display = ("formatted_packaging",)  # Display formatted packaging
+    search_fields = ("packaging_quantity", "packaging_value")
+    ordering = ("packaging_quantity",)
+
+    def formatted_packaging(self, obj):
+        """Return the packaging formatted as 'quantity x value'."""
+        return f"{obj.packaging_quantity} x {obj.packaging_value}"
+
+    formatted_packaging.short_description = "Packaging"

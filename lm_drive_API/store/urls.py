@@ -1,11 +1,14 @@
 from django.urls import path
 from .views import (
+    BrandListView,
     ProductListCreateAPIView,
     ProductRetrieveUpdateDestroyAPIView,
     CategoryListCreateAPIView,
     CategoryRetrieveUpdateDestroyAPIView,
     SubCategoryListCreateAPIView,
     SubCategoryRetrieveUpdateDestroyAPIView,
+    StockListCreateAPIView,
+    StockRetrieveUpdateDestroyAPIView,
 )
 
 urlpatterns = [
@@ -33,4 +36,19 @@ urlpatterns = [
         SubCategoryRetrieveUpdateDestroyAPIView.as_view(),
         name="subcategory-detail",
     ),
+    # List and create stock records for a specific store
+    path(
+        "<str:store_id>/stocks/",
+        StockListCreateAPIView.as_view(),
+        name="store-stock-list-create",
+    ),
+    # Retrieve, update, and delete a specific stock record for a store (using stock ID and store ID)
+    path(
+        "<str:store_id>/stocks/<str:product_id>/",  # Ensure store_id and product_id match exactly
+        StockRetrieveUpdateDestroyAPIView.as_view(),
+        name="product-stock-retrieve-update-destroy",
+    ),
+    path(
+        "brands/", BrandListView.as_view(), name="brand-list"
+    ),  # Endpoint for listing brands
 ]

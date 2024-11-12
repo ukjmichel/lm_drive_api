@@ -1,3 +1,4 @@
+from django.forms import ValidationError
 from rest_framework import generics, status
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import AllowAny
@@ -11,12 +12,48 @@ from .permissions import IsCustomerOrAdmin
 class CustomerListCreateAPIView(generics.ListCreateAPIView):
     queryset = Customer.objects.all()
     serializer_class = CustomerSerializer
-    permission_classes = [
-        AllowAny
-    ]  # Allow access to any user, including unauthenticated users
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        # Return queryset based on user's staff status
+        if self.request.user.is_authenticated:
+            if self.request.user.is_staff:
+                return Customer.objects.all()
+            return Customer.objects.filter(user=self.request.user)
+        return Customer.objects.none()
+
+    def get(self, request, *args, **kwargs):
+        # Check if the user is authenticated
+        if not request.user.is_authenticated:
+            return Response(
+                {"detail": "You do not have permission to perform this action."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().get(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        serializer.save()
+        # Perform user and customer creation, leveraging the serializer's built-in validation
+        user_data = serializer.validated_data.get("user", None)
+
+        if user_data:
+            username = user_data.get("username", None)
+            if username:
+                # The username validation is now handled by the serializer itself
+                # If the username is invalid, the serializer will raise a ValidationError
+                pass
+            else:
+                raise ValidationError({"error": "Username is required."})
+
+        # Proceed with creating the customer only if validation passes
+        try:
+            # Save the customer object, which also saves the related user
+            serializer.save()
+        except Exception as e:
+            # Catch any error during the save process and return a detailed response
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
 
 class CustomerRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
@@ -64,4 +101,3 @@ class CustomTokenObtainPairView(TokenObtainPairView):
         )  # tokens will include access and refresh tokens
 
         return Response(tokens, status=status.HTTP_200_OK)
-    

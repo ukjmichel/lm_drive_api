@@ -22,6 +22,8 @@ load_dotenv()
 # Stripe
 STRIPE_PUBLISHABLE_KEY = config("STRIPE_PUBLISHABLE_KEY")
 STRIPE_SECRET_KEY = config("STRIPE_SECRET_KEY")
+STRIPE_TEST_SECRET_KEY = config("STRIPE_TEST_SECRET_KEY")
+STRIPE_RETURN_URL = "http://localhost:5173/"
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -149,11 +151,15 @@ STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
-    "DEFAULT_FILTER_BACKENDS": ("django_filters.rest_framework.DjangoFilterBackend",),
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    "DEFAULT_FILTER_BACKENDS": (
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.SearchFilter",  # Optional: to enable search
+        "rest_framework.filters.OrderingFilter",  # Optional: to enable ordering
+    ),
 }
 
 CORS_ORIGIN_ALLOW_ALL = (
@@ -186,6 +192,7 @@ CORS_ALLOW_HEADERS = [
     "user-agent",
     "x-requested-with",
 ]
+
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),  # Example: 5 minutes

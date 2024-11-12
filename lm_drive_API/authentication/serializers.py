@@ -5,31 +5,42 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 
 class UserSerializer(serializers.ModelSerializer):
-    """
-    Serializer for User model to include username and password.
-    """
-
-    password = serializers.CharField(
-        write_only=True
-    )  # Add password field for user creation
+    password = serializers.CharField(write_only=True)  # Password is write-only
 
     class Meta:
         model = User
-        fields = ["username", "password"]  # Expose username and password fields
+        fields = ["username", "password"]
+
+    def validate_username(self, value):
+        """Custom username validation"""
+        if len(value) < 4:
+            raise serializers.ValidationError(
+                "Username must be at least 4 characters long."
+            )
+        if len(value) > 20:
+            raise serializers.ValidationError(
+                "Username cannot be more than 20 characters long."
+            )
+        if User.objects.filter(username=value).exists():
+            raise serializers.ValidationError(
+                "A user with this username already exists."
+            )
+        return value
 
     def create(self, validated_data):
+        """Create a new user instance"""
         password = validated_data.pop("password")  # Extract password
-        user = User(**validated_data)  # Create user instance without saving yet
-        user.set_password(password)  # Set password
+        user = User(**validated_data)  # Create user instance
+        user.set_password(password)  # Set password (hashed)
         user.save()  # Save the user
         return user
 
 
 class CustomerSerializer(serializers.ModelSerializer):
-    user = UserSerializer()  # Nested serializer to create/update a user
+    user = UserSerializer()  # Nested UserSerializer for user data
     stripe_customer_id = serializers.CharField(
         read_only=True
-    )  # Add stripe_customer_id as read-only
+    )  # Read-only field for stripe_customer_id
 
     class Meta:
         model = Customer
@@ -39,50 +50,50 @@ class CustomerSerializer(serializers.ModelSerializer):
             "email",
             "stripe_customer_id",  # Include Stripe ID only for staff
         ]
-        read_only_fields = ["customer_id", "stripe_customer_id"]  # Mark as read-only
+        read_only_fields = [
+            "customer_id",
+            "stripe_customer_id",
+        ]  # Make these fields read-only
+
+    def validate_email(self, value):
+        """Validate that the email does not already exist for a customer"""
+        if Customer.objects.filter(email=value).exists():
+            raise serializers.ValidationError(
+                "A customer with this email already exists."
+            )
+        return value
 
     def create(self, validated_data):
-        user_data = validated_data.pop("user")  # Extract user data
+        """Create a new customer instance"""
+        user_data = validated_data.pop("user")  # Extract user data from validated data
 
-        # Ensure password is provided
+        # Ensure password is provided for user creation
         if "password" not in user_data:
             raise serializers.ValidationError({"password": "This field is required."})
 
-        email = validated_data.get("email")  # Get email from validated data
-
-        # Check if a user with this username already exists
-        if User.objects.filter(username=user_data["username"]).exists():
-            raise serializers.ValidationError(
-                {"username": "A user with this username already exists."}
-            )
-
-        # Check if a customer with this email already exists
-        if Customer.objects.filter(email=email).exists():
-            raise serializers.ValidationError(
-                {"email": "A customer with this email already exists."}
-            )
-
-        # Create the User instance using the nested serializer
+        # Create the user instance using the nested UserSerializer
         user_serializer = UserSerializer(data=user_data)
-        user_serializer.is_valid(raise_exception=True)  # Validate user data
-        user = user_serializer.save()  # Create user
+        user_serializer.is_valid(raise_exception=True)  # Validate the user data
+        user = user_serializer.save()  # Create the user
 
-        # Create the Customer instance linked to the User, passing the email
-        customer = Customer.objects.create(user=user, email=email)
+        # Create the Customer instance and link it to the created user
+        customer = Customer.objects.create(user=user, email=validated_data["email"])
 
         return customer
 
     def update(self, instance, validated_data):
+        """Update an existing customer instance"""
         user_data = validated_data.pop("user", None)  # Extract user data, if provided
         user = (
             instance.user
         )  # Get the current user instance associated with the customer
 
-        # Update the User fields if user data is present
+        # Update the User fields if user data is provided
         if user_data:
-            user.username = user_data.get("username", user.username)  # Update username
+            username = user_data.get("username", user.username)
             if "password" in user_data:
-                user.set_password(user_data["password"])  # Update password
+                user.set_password(user_data["password"])  # Update password if provided
+            user.username = username  # Update username if provided
             user.save()
 
         # Update the Customer fields

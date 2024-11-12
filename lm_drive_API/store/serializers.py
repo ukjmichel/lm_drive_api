@@ -1,90 +1,78 @@
+import datetime
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
-from .models import Product, Category, SubCategory, Stock
+from .models import Product, Category, SubCategory, Stock, Packaging, Brand
 
 
-class CategorySerializer(serializers.ModelSerializer):
+class BaseCategorySerializer(serializers.ModelSerializer):
+    def to_internal_value(self, data):
+        if "id" in data:
+            try:
+                category = self.Meta.model.objects.get(id=data["id"])
+                return {
+                    "id": category.id,
+                    "name": category.name,
+                }
+            except self.Meta.model.DoesNotExist:
+                raise ValidationError(
+                    f"{self.Meta.model.__name__} with this ID does not exist."
+                )
+
+        if "name" in data:
+            try:
+                category = self.Meta.model.objects.get(name=data["name"])
+                return {
+                    "id": category.id,
+                    "name": category.name,
+                }
+            except self.Meta.model.DoesNotExist:
+                # If not found, let the base method handle the data
+                return super().to_internal_value(data)
+
+        raise ValidationError(
+            f"{self.Meta.model.__name__} must have either an 'id' or 'name'."
+        )
+
+
+class CategorySerializer(BaseCategorySerializer):
     class Meta:
         model = Category
         fields = ["id", "name"]
 
-    def to_internal_value(self, data):
-        # Check for ID first, and return the ID if it exists
-        if "id" in data:
-            try:
-                category = Category.objects.get(id=data["id"])
-                return {
-                    "id": category.id,
-                    "name": category.name,
-                }  # Return dict with existing category data
-            except Category.DoesNotExist:
-                raise serializers.ValidationError(
-                    "Category with this ID does not exist."
-                )
 
-        # Check for name, and return the name if it exists
-        if "name" in data:
-            try:
-                category = Category.objects.get(name=data["name"])
-                return {
-                    "id": category.id,
-                    "name": category.name,
-                }  # Return dict with existing category data
-            except Category.DoesNotExist:
-                # If not found, let the base method handle the data
-                return super().to_internal_value(data)
-
-        # Raise error if neither id nor name are present
-        raise serializers.ValidationError(
-            "Category must have either an 'id' or 'name'."
-        )
-
-
-class SubCategorySerializer(serializers.ModelSerializer):
+class SubCategorySerializer(BaseCategorySerializer):
     class Meta:
         model = SubCategory
         fields = ["id", "name"]
 
-    def to_internal_value(self, data):
-        # Check for ID first, and return the ID if it exists
-        if "id" in data:
-            try:
-                subcategory = SubCategory.objects.get(id=data["id"])
-                return {
-                    "id": subcategory.id,
-                    "name": subcategory.name,
-                }  # Return dict with existing subcategory data
-            except SubCategory.DoesNotExist:
-                raise serializers.ValidationError(
-                    "SubCategory with this ID does not exist."
-                )
 
-        # Check for name, and return the name if it exists
-        if "name" in data:
-            try:
-                subcategory = SubCategory.objects.get(name=data["name"])
-                return {
-                    "id": subcategory.id,
-                    "name": subcategory.name,
-                }  # Return dict with existing subcategory data
-            except SubCategory.DoesNotExist:
-                # If not found, let the base method handle the data
-                return super().to_internal_value(data)
-
-        # Raise error if neither id nor name are present
-        raise serializers.ValidationError(
-            "SubCategory must have either an 'id' or 'name'."
-        )
+class BrandSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Brand
+        fields = ["id", "name"]  # Fields you want to include in the API response
 
 
-from rest_framework import serializers
-from rest_framework.exceptions import ValidationError
+class PackagingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Packaging
+        fields = [
+            "packaging_quantity",
+            "packaging_value",
+            "packaging_type",
+        ]
 
 
 class ProductSerializer(serializers.ModelSerializer):
+    brand = serializers.SlugRelatedField(
+        queryset=Brand.objects.all(),
+        slug_field="name",  # This will display the brand's name instead of ID
+    )
     category = CategorySerializer()
     subcategories = SubCategorySerializer(many=True)
-    stock = serializers.SerializerMethodField()  # Custom field for stock information
+    stock_summary = (
+        serializers.SerializerMethodField()
+    )  # Custom field for stock summary
+    packaging = PackagingSerializer()  # Add packaging field
 
     class Meta:
         model = Product
@@ -98,107 +86,148 @@ class ProductSerializer(serializers.ModelSerializer):
             "category",
             "subcategories",
             "image",
-            "stock",  # Include stock in the output
+            "packaging",  # Include packaging in the output
+            "stock_summary",  # Include stock summary in the output
         ]
-        read_only_fields = ["stock"]  # Make stock read-only
 
-    def get_stock(self, obj):
+    def get_stock_summary(self, obj):
         """
-        Get all stock details related to the product.
-        Returns an array of stock for different stores.
+        Get the total stock and stock details related to the product.
+        Returns a dictionary with total stock and stock for different stores.
         """
-        stock_entries = Stock.objects.filter(
-            product=obj
-        )  # Fetch all stock related to the product
-        return StockSerializer(
-            stock_entries, many=True
-        ).data  # Serialize all stock entries as a list
+        return obj.get_stock_summary()  # Call the method to retrieve stock summary
 
     def to_representation(self, instance):
         """
         Customize the representation of the product data.
-        Stock is only visible to authenticated users.
+        Stock summary and price are only visible to authenticated users.
         """
+        # Get the initial representation from the parent class
         representation = super().to_representation(instance)
 
-        # Check if the user is authenticated from the request context
-        request = self.context.get("request", None)
+        # Retrieve the request from the context to check if the user is authenticated
+        request = self.context.get("request")
         if request and request.user.is_authenticated:
-            representation["stock"] = self.get_stock(
-                instance
-            )  # Include stock if authenticated
+            # Add stock summary and price if the user is authenticated
+            representation["stock_summary"] = self.get_stock_summary(instance)
+            representation["price"] = instance.price
         else:
-            representation.pop("stock", None)  # Remove stock if not authenticated
+            # Remove stock summary and price for unauthenticated users
+            representation.pop("stock_summary", None)
+            representation.pop("price", None)
+
+        # Add image URL to the representation, handling cases where image or request might be missing
+        representation["image_url"] = self.get_image_url(instance)
 
         return representation
 
     def get_image_url(self, obj):
+        """
+        Build the absolute URL for the product image, if available.
+        """
         request = self.context.get("request")
-        return request.build_absolute_uri(obj.image.url) if obj.image else None
+        if request and obj.image:
+            return request.build_absolute_uri(obj.image.url)
+        return None
 
     def create(self, validated_data):
+        """
+        Create a new product instance.
+        """
+        packaging_data = validated_data.pop("packaging")  # Extract packaging data
         product_id = validated_data.get("product_id")
         upc = validated_data.get("upc")
 
-        # Check if a product with the same product_id or UPC already exists
+        # Check for existing product_id or UPC
         if Product.objects.filter(product_id=product_id).exists():
             raise ValidationError(
                 f"Product with product_id '{product_id}' already exists."
             )
-
         if Product.objects.filter(upc=upc).exists():
             raise ValidationError(f"Product with UPC '{upc}' already exists.")
 
         # Handle main category
         category_data = validated_data.pop("category")
-        category, created = Category.objects.get_or_create(name=category_data["name"])
+        category, _ = Category.objects.get_or_create(name=category_data["name"])
 
         # Handle subcategories
         subcategories_data = validated_data.pop("subcategories", [])
-        subcategory_objs = []
-        for subcategory_data in subcategories_data:
-            subcategory, created = SubCategory.objects.get_or_create(
-                name=subcategory_data["name"]
-            )
-            subcategory_objs.append(subcategory)
+        subcategory_objs = [
+            SubCategory.objects.get_or_create(name=subcategory_data["name"])[0]
+            for subcategory_data in subcategories_data
+        ]
+
+        # Handle packaging
+        packaging, _ = Packaging.objects.get_or_create(
+            packaging_quantity=packaging_data["packaging_quantity"],
+            packaging_value=packaging_data["packaging_value"],
+            packaging_type=packaging_data["packaging_type"],
+        )
 
         # Create product
-        product = Product.objects.create(category=category, **validated_data)
-        product.subcategories.set(subcategory_objs)
+        product = Product.objects.create(
+            category=category, packaging=packaging, **validated_data
+        )
+        product.subcategories.set(subcategory_objs)  # Set subcategories
         return product
 
     def update(self, instance, validated_data):
-        # Update main category
+        """
+        Update an existing product instance.
+        """
+        # Extract packaging data if it exists
+        packaging_data = validated_data.pop("packaging", None)
+        if packaging_data:
+            # Update or create packaging
+            packaging, _ = Packaging.objects.get_or_create(
+                packaging_quantity=packaging_data["packaging_quantity"],
+                packaging_value=packaging_data["packaging_value"],
+                packaging_type=packaging_data["packaging_type"],
+            )
+            instance.packaging = packaging  # Set the updated packaging
+
+        # Handle category
         category_data = validated_data.pop("category", None)
         if category_data:
-            category, created = Category.objects.get_or_create(
-                name=category_data["name"]
-            )
-            instance.category = category
+            category, _ = Category.objects.get_or_create(name=category_data["name"])
+            instance.category = category  # Set the updated category
 
-        # Update subcategories
+        # Handle subcategories
         subcategories_data = validated_data.pop("subcategories", [])
         if subcategories_data:
-            subcategory_objs = []
-            for subcategory_data in subcategories_data:
-                subcategory, created = SubCategory.objects.get_or_create(
-                    name=subcategory_data["name"]
-                )
-                subcategory_objs.append(subcategory)
-            instance.subcategories.set(subcategory_objs)
+            subcategory_objs = [
+                SubCategory.objects.get_or_create(name=subcategory_data["name"])[0]
+                for subcategory_data in subcategories_data
+            ]
+            instance.subcategories.set(
+                subcategory_objs
+            )  # Set the updated subcategories
 
-        # Update remaining fields
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
+        # Update product fields
+        for key, value in validated_data.items():
+            setattr(instance, key, value)
 
-        instance.save()
+        instance.save()  # Save the updated product
         return instance
 
 
 class StockSerializer(serializers.ModelSerializer):
+    store_name = serializers.CharField(
+        source="store.name", read_only=True
+    )  # Read-only to fetch store name
+
     class Meta:
         model = Stock
-        fields = ["store", "product", "quantity_in_stock", "expiration_date"]
+        fields = [
+            "store",  # Optional, if you want to return the store object
+            "store_name",  # Return the name of the store
+            "product",  # Optional, if you want to return the product object
+            "quantity_in_stock",
+            "expiration_date",
+        ]
+        read_only_fields = [
+            "id"
+        ]  # Make 'id' read-only if you don't want it to be included in POST requests
 
     def create(self, validated_data):
         """
@@ -222,21 +251,18 @@ class StockSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
 
-    # Removed duplicate Meta class definition
-    class Meta:
-        model = Stock  # Corrected to use Stock
-        fields = [
-            "store",
-            "product",
-            "quantity_in_stock",
-            "expiration_date",
-        ]  # Include relevant fields
-        read_only_fields = [
-            "id"
-        ]  # Optionally make id read-only if you don't want it to be included in POST requests
-
     def validate_quantity_in_stock(self, value):
-        """Ensure that the quantity in stock is not negative."""
+        """
+        Validate that the quantity in stock is not negative.
+        """
         if value < 0:
             raise serializers.ValidationError("Quantity in stock cannot be negative.")
+        return value
+
+    def validate_expiration_date(self, value):
+        """
+        Validate that the expiration date is in the future.
+        """
+        if value < datetime.date.today():
+            raise serializers.ValidationError("Expiration date must be in the future.")
         return value
