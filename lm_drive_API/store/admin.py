@@ -1,6 +1,4 @@
 from django.contrib import admin
-
-
 from .models import Product, Category, SubCategory, Stock, Store, Packaging, Brand
 
 
@@ -26,8 +24,8 @@ class StockInline(admin.TabularInline):
 
 
 # Packaging Inline for Product
-class PackagingInline(admin.TabularInline):
-    model = Packaging  # Allows for packaging management within Product
+class ProductPackagingInline(admin.TabularInline):
+    model = Packaging  # Directly reference the Packaging model (ForeignKey)
     extra = 1
     verbose_name = "Packaging Entry"
     verbose_name_plural = "Packaging Entries"
@@ -49,6 +47,7 @@ class SubCategoryAdmin(admin.ModelAdmin):
     ordering = ("name",)
 
 
+# Brand Admin
 @admin.register(Brand)
 class BrandAdmin(admin.ModelAdmin):
     list_display = ("id", "name")  # Display brand ID and name
@@ -80,17 +79,22 @@ class ProductAdmin(admin.ModelAdmin):
     inlines = [
         SubCategoryInline,
         StockInline,
+        # Removed PackagingInline, since it's a ForeignKey relationship
     ]
 
     # Define stock for specific stores
     def crèche_stock(self, obj):
         """Return the stock quantity for the Crêche store."""
-        stock = obj.stocks.filter(store__id="CRE71780").first()
+        stock = obj.stocks.filter(
+            store__store_id="CRE71780"
+        ).first()  # Corrected store ID field
         return stock.quantity_in_stock if stock else 0
 
     def villefranche_stock(self, obj):
         """Return the stock quantity for the Villefranche store."""
-        stock = obj.stocks.filter(store__id="VIL69400").first()
+        stock = obj.stocks.filter(
+            store__store_id="VIL69400"
+        ).first()  # Corrected store ID field
         return stock.quantity_in_stock if stock else 0
 
     def total_stock(self, obj):
@@ -100,7 +104,7 @@ class ProductAdmin(admin.ModelAdmin):
 
     def packaging_display(self, obj):
         """Return the packaging formatted as 'quantity x value'."""
-        if obj.packaging:
+        if obj.packaging:  # Check if packaging exists (ForeignKey relation)
             return (
                 f"{obj.packaging.packaging_quantity} x {obj.packaging.packaging_value}"
             )
@@ -139,7 +143,7 @@ class StockAdmin(admin.ModelAdmin):
 @admin.register(Store)
 class StoreAdmin(admin.ModelAdmin):
     list_display = (
-        "id",
+        "store_id",
         "name",
         "address",  # Display address if needed
         "city",  # Display city if needed

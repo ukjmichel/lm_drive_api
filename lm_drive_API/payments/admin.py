@@ -10,10 +10,18 @@ class PaymentAdmin(admin.ModelAdmin):
         "payment_method_id",
         "amount",
         "currency",
+        "status",  # Add the status field to the list display
         "created_at",
     )
+
     # Specify all fields as read-only
-    readonly_fields = ("order", "payment_method_id", "amount", "currency", "created_at")
+    readonly_fields = (
+        "order",
+        "payment_method_id",
+        "amount",
+        "currency",
+        "created_at",
+    )
 
     # Optionally, you can disable adding and deleting
     def has_add_permission(self, request):

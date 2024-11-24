@@ -27,6 +27,8 @@ class Order(models.Model):
     order_id = models.CharField(
         max_length=4, default=generate_order_id, unique=True, primary_key=True
     )
+    # Adding store_id to the Order model
+    store = models.ForeignKey("store.Store", on_delete=models.CASCADE)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending")
     confirmed_date = models.DateTimeField(null=True, blank=True)  # Confirmed date
     fulfilled_date = models.DateTimeField(null=True, blank=True)  # Fulfilled date

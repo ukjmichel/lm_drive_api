@@ -1,8 +1,11 @@
 from django.http import Http404
+from requests import Response
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
+from rest_framework import serializers
+import datetime
 from .models import Brand, Product, Category, SubCategory, Stock, Store, Packaging
 from .serializers import (
     BrandSerializer,
@@ -114,9 +117,7 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
         queryset = super().get_queryset()
         category_name = self.request.query_params.get("category", None)
         subcategory_name = self.request.query_params.get("subcategory", None)
-        brand_name = self.request.query_params.get(
-            "brand", None
-        )  # Get brand filter from query params
+        brand_name = self.request.query_params.get("brand", None)
 
         if category_name:
             queryset = queryset.filter(category__name__icontains=category_name)
@@ -125,15 +126,19 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
             queryset = queryset.filter(subcategories__name__icontains=subcategory_name)
 
         if brand_name:
-            queryset = queryset.filter(
-                brand__name__icontains=brand_name
-            )  # Filter by brand
+            queryset = queryset.filter(brand__name__icontains=brand_name)
 
         # If user is not authenticated, exclude price by limiting fields
         if not self.request.user.is_authenticated:
             queryset = queryset.only(
-                "product_id", "product_name", "description", "brand", "image"
-            )  # Use only() to exclude price but still return full instances
+                "product_id",
+                "product_name",
+                "description",
+                "brand",
+                "image1",
+                "image2",
+                "image3",
+            )
 
         return queryset.distinct()  # Ensure distinct results
 
@@ -141,26 +146,6 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
         self.validate_packaging(serializer)
         self.validate_product_uniqueness(serializer)
         serializer.save()
-
-    def validate_packaging(self, serializer):
-        packaging_data = self.request.data.get("packaging")
-
-        if packaging_data:
-            packaging_quantity = packaging_data.get("packaging_quantity")
-            packaging_value = packaging_data.get("packaging_value")
-            packaging_type = packaging_data.get("packaging_type")
-
-            if not all([packaging_quantity, packaging_value, packaging_type]):
-                raise ValidationError("All packaging fields must be provided.")
-
-            packaging, created = Packaging.objects.get_or_create(
-                packaging_quantity=packaging_quantity,
-                packaging_value=packaging_value,
-                packaging_type=packaging_type,
-            )
-            serializer.validated_data["packaging"] = packaging
-
-    def validate_product_uniqueness(self, serializer):
         product_id = serializer.validated_data.get("product_id")
         upc = serializer.validated_data.get("upc")
 
@@ -181,7 +166,15 @@ class ProductRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView)
     def perform_update(self, serializer):
         self.validate_packaging(serializer)
         self.validate_product_uniqueness(serializer)
+        self.validate_images(serializer)
         serializer.save()
+
+    def validate_images(self, serializer):
+        """Validate image fields for update."""
+        for field in ["image1", "image2", "image3"]:
+            image = self.request.data.get(field, None)
+            if image and not isinstance(image, UploadedFile):
+                raise ValidationError(f"{field} must be a valid image file.")
 
     def validate_packaging(self, serializer):
         packaging_data = self.request.data.get("packaging", None)
@@ -209,6 +202,16 @@ class ProductRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView)
         if upc and Product.objects.filter(upc=upc).exists():
             raise ValidationError(f"Product with UPC '{upc}' already exists.")
 
+        product_id = serializer.validated_data.get("product_id")
+        upc = serializer.validated_data.get("upc")
+
+        if Product.objects.filter(product_id=product_id).exists():
+            raise ValidationError(
+                f"Product with product_id '{product_id}' already exists."
+            )
+        if upc and Product.objects.filter(upc=upc).exists():
+            raise ValidationError(f"Product with UPC '{upc}' already exists.")
+
 
 class StockPagination(PageNumberPagination):
     page_size = 10
@@ -224,7 +227,7 @@ class StockListCreateAPIView(generics.ListCreateAPIView):
         try:
             # Retrieve the store using store_id from URL
             store_id = self.kwargs["store_id"]
-            store = get_object_or_404(Store, id=store_id)
+            store = get_object_or_404(Store, store_id=store_id)
             return Stock.objects.filter(store=store)  # Filter stocks based on store_id
         except Store.DoesNotExist:
             # Handle the case where the store doesn't exist
@@ -236,7 +239,7 @@ class StockListCreateAPIView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         try:
             store_id = self.kwargs["store_id"]
-            store = get_object_or_404(Store, id=store_id)
+            store = get_object_or_404(Store, store_id=store_id)
             product = serializer.validated_data.get("product")
 
             # Check if a stock record already exists for the product and store
@@ -260,45 +263,78 @@ class StockListCreateAPIView(generics.ListCreateAPIView):
 
 
 class StockRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    API view to retrieve, update, or delete a Stock instance.
+    """
+
     serializer_class = StockSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        try:
-            # Attempt to retrieve the store and product based on IDs
-            store_id = self.kwargs["store_id"]
-            product_id = self.kwargs["product_id"]
+        """
+        Filter Stock objects by store_id and product_id from the URL path.
+        """
+        store_id = self.kwargs.get("store_id")
+        product_id = self.kwargs.get("product_id")
 
-            # Get the store and product using their respective IDs
-            store = get_object_or_404(Store, id=store_id)
-            product = get_object_or_404(Product, product_id=product_id)
+        # Validate and retrieve store and product
+        store = get_object_or_404(Store, store_id=store_id)
+        product = get_object_or_404(Product, product_id=product_id)
 
-            # Return the filtered queryset for Stock based on store and product
-            return Stock.objects.filter(store=store, product=product)
-
-        except Store.DoesNotExist:
-            # Handle the case where the store does not exist
-            raise Http404(f"Store with ID {store_id} not found.")
-
-        except Product.DoesNotExist:
-            # Handle the case where the product does not exist
-            raise Http404(f"Product with ID {product_id} not found.")
-
-        except Exception as e:
-            # Catch any other unexpected exceptions
-            raise Http404(f"An unexpected error occurred: {str(e)}")
+        # Filter Stock based on store and product
+        return Stock.objects.filter(store=store, product=product)
 
     def get_object(self):
-        # Directly calling get_object() from the parent view class
+        """
+        Retrieve a single Stock object from the filtered queryset.
+        """
         queryset = self.get_queryset()
-        return queryset.get()  # Retrieve a single object from the filtered queryset
+        return get_object_or_404(queryset)
+
+    def update(self, request, *args, **kwargs):
+        """
+        Override update method to handle validation and custom responses.
+        """
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except ValidationError as exc:
+            # Return a custom error response on validation failure
+            return Response(
+                {
+                    "errors": exc.detail,
+                    "message": "Validation failed",
+                    "status_code": 400,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Perform the update
+        self.perform_update(serializer)
+        return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Handle deletion of a Stock instance.
+        """
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response(
+            {"message": "Stock deleted successfully", "status_code": 204},
+            status=status.HTTP_204_NO_CONTENT,
+        )
 
     def perform_update(self, serializer):
-        # This will call 'save()' after the update operation
+        """
+        Save the updated Stock instance.
+        """
         serializer.save()
 
     def perform_destroy(self, instance):
-        # Deleting the instance
+        """
+        Delete the Stock instance.
+        """
         instance.delete()
 
 

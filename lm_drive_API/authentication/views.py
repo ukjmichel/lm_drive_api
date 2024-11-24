@@ -1,6 +1,5 @@
-from django.forms import ValidationError
 from rest_framework import generics, status
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, ValidationError as DRFValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.response import Response
@@ -32,21 +31,16 @@ class CustomerListCreateAPIView(generics.ListCreateAPIView):
         return super().get(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        # Perform user and customer creation, leveraging the serializer's built-in validation
         user_data = serializer.validated_data.get("user", None)
 
+        # Validation for user and username
         if user_data:
             username = user_data.get("username", None)
-            if username:
-                # The username validation is now handled by the serializer itself
-                # If the username is invalid, the serializer will raise a ValidationError
-                pass
-            else:
-                raise ValidationError({"error": "Username is required."})
+            if not username:
+                raise DRFValidationError({"error": "Username is required."})
 
         # Proceed with creating the customer only if validation passes
         try:
-            # Save the customer object, which also saves the related user
             serializer.save()
         except Exception as e:
             # Catch any error during the save process and return a detailed response
@@ -95,9 +89,14 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+
+        # Check if the serializer is valid, raise ValidationError if invalid
+        if not serializer.is_valid():
+            raise DRFValidationError(
+                {"error": "Invalid credentials."}
+            )  # Validation error example
+
         tokens = (
             serializer.validated_data
         )  # tokens will include access and refresh tokens
-
         return Response(tokens, status=status.HTTP_200_OK)

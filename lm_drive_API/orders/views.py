@@ -1,7 +1,11 @@
+from django.forms import ValidationError
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, serializers, status
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import PermissionDenied, NotFound, ValidationError
+from rest_framework.exceptions import (
+    PermissionDenied,
+    ValidationError as DRFValidationError,
+)
 from rest_framework.response import Response
 from .models import Order, OrderItem
 from .serializers import (
@@ -11,64 +15,90 @@ from .serializers import (
     OrderItemUpdateSerializer,
 )
 from authentication.models import Customer
-from store.models import Product
+from store.models import Product, Store
 
 
+# Order List and Create View
 class OrderListCreateView(generics.ListCreateAPIView):
     serializer_class = OrderListSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user
-
         if user.is_staff:
-            # Staff can see all orders
             return Order.objects.all()
-        else:
-            # Customers can see their own orders
-            try:
-                customer = Customer.objects.get(user=user)
-                return Order.objects.filter(customer=customer)
-            except Customer.DoesNotExist:
-                return (
-                    Order.objects.none()
-                )  # Return an empty queryset if customer doesn't exist
+        customer = Customer.objects.filter(user=user).first()
+        return (
+            Order.objects.filter(customer=customer)
+            if customer
+            else Order.objects.none()
+        )
 
     def perform_create(self, serializer):
         user = self.request.user
+        items = self.request.data.get("items", [])
+        customer_id = self.request.data.get("customer_id")
+        store_id = self.request.data.get("store_id")
 
-        if user.is_staff:
-            # Admins can specify the customer when creating an order
-            customer_id = self.request.data.get("customer_id")
+        if not customer_id or not store_id:
+            raise DRFValidationError("'customer_id' and 'store_id' are required.")
+
+        try:
+            customer = Customer.objects.get(customer_id=customer_id)
+        except Customer.DoesNotExist:
+            raise DRFValidationError(f"Customer with id {customer_id} does not exist.")
+
+        try:
+            store = Store.objects.get(store_id=store_id)
+        except Store.DoesNotExist:
+            raise DRFValidationError(f"Store with id {store_id} does not exist.")
+
+        # Check if there's already a pending order for this customer
+        if Order.objects.filter(customer=customer, status="pending").exists():
+            raise DRFValidationError(
+                "Only one pending order can be created per customer."
+            )
+
+        # Save the order first to generate the order_id
+        order = serializer.save(customer=customer, store=store)
+
+        total_amount = 0
+        for item in items:
+            product_id = item.get("product_id")
+            quantity = item.get("quantity", 1)
+
+            if int(quantity) < 1:
+                raise DRFValidationError("Quantity must be at least 1.")
+
             try:
-                customer = Customer.objects.get(customer_id=customer_id)
-            except Customer.DoesNotExist:
-                raise serializers.ValidationError(
-                    "The specified customer does not exist."
+                product = Product.objects.get(product_id=product_id)
+            except Product.DoesNotExist:
+                raise DRFValidationError(
+                    f"Product with id {product_id} does not exist."
                 )
 
-            # Save the order with the specified customer
-            serializer.save(customer=customer)
+            price = product.price
+            total_price = price * int(quantity)
 
-        else:
-            # Regular customers can only create orders for themselves
-            try:
-                customer = Customer.objects.get(user=user)
-            except Customer.DoesNotExist:
-                raise serializers.ValidationError(
-                    "You must be a registered customer to place an order."
-                )
+            # Create the order item
+            OrderItem.objects.create(
+                order=order,
+                product=product,
+                price=price,
+                quantity=quantity,
+                total=total_price,
+            )
 
-            # Check if the customer already has a pending order
-            if Order.objects.filter(customer=customer, status="pending").exists():
-                raise serializers.ValidationError(
-                    "A customer can only have one pending order at a time."
-                )
+            total_amount += total_price
 
-            # Save the order with the associated customer
-            serializer.save(customer=customer)
+        # Update the order's total amount after all items are added
+        order.total_amount = total_amount
+        order.save()
+
+        return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
 
 
+# Order Retrieve, Update, and Delete View
 class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
@@ -76,170 +106,95 @@ class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
     lookup_field = "order_id"
 
     def get_queryset(self):
-        user = self.request.user  # Get the authenticated user
-
-        # If the user is staff, return all orders
+        user = self.request.user
         if user.is_staff:
             return Order.objects.all()
-
-        # Fetch the Customer instance related to the user
-        try:
-            customer = Customer.objects.get(user=user)
-        except Customer.DoesNotExist:
-            raise NotFound("Customer does not exist.")
-
-        # Filter orders by the customer's ID
+        customer = get_object_or_404(Customer, user=user)
         return Order.objects.filter(customer=customer)
 
     def perform_update(self, serializer):
-        order = self.get_object()  # Get the current order instance
-        new_status = serializer.validated_data.get(
-            "status"
-        )  # Get the status the user is trying to set
-
-        # Check if the user is not staff and also not the owner of the order
-        if not self.request.user.is_staff and order.customer.user != self.request.user:
-            raise PermissionDenied("You do not have permission to update this order.")
-
-        # If the user is not staff, ensure the order is still pending and status is set to 'confirmed'
+        order = self.get_object()
+        new_status = serializer.validated_data.get("status")
         if not self.request.user.is_staff:
+            if order.customer.user != self.request.user:
+                raise PermissionDenied(
+                    "You do not have permission to update this order."
+                )
             if order.status != "pending":
-                raise PermissionDenied(
-                    "You cannot update this order because it is not pending."
-                )
+                raise PermissionDenied("Only pending orders can be updated.")
             if new_status != "confirmed":
-                raise PermissionDenied(
-                    "Non-staff users can only set the status to 'confirmed'."
-                )
-
-        # Staff can update the order freely, without these restrictions
-        serializer.save()  # Proceed with the update
+                raise PermissionDenied("Only 'confirmed' status is allowed.")
+        serializer.save()
 
     def perform_destroy(self, instance):
-        # Allow staff to delete orders
         if self.request.user.is_staff:
             instance.delete()
         else:
             raise PermissionDenied("Only staff can delete orders.")
 
 
+# Add Item to Order View
 class AddOrderItemView(generics.CreateAPIView):
-    """
-    View for adding an item to an existing order.
-    Only the owner of the order or an admin can access this view.
-    """
-
     serializer_class = OrderItemSerializer
-    permission_classes = [IsAuthenticated]  # Ensure the user is authenticated
-
-    def get_order_and_product(self, order_id, product_id):
-        product = get_object_or_404(Product, product_id=product_id)
-        order = get_object_or_404(Order, order_id=order_id)
-        return order, product
-
-    def check_order_permissions(self, request, order):
-        """Check if the user is allowed to access/modify the order."""
-        user = request.user
-        if order.customer.user != user and not user.is_staff:
-            raise PermissionDenied(
-                "You do not have permission to access or modify this order."
-            )
-
-    def post(self, request, *args, **kwargs):
-        # Extract order_id, product_id, and quantity from request data
-        order_id = request.data.get("order_id")
-        product_id = request.data.get("product_id")
-        quantity = request.data.get("quantity", 1)  # Default quantity to 1
-
-        # Ensure the quantity is valid
-        if quantity < 1:
-            return Response(
-                {"error": "Quantity must be at least 1."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        order, product = self.get_order_and_product(order_id, product_id)
-
-        # Check if the current user has permission to modify this order
-        self.check_order_permissions(request, order)
-
-        try:
-            # Check if the OrderItem already exists
-            order_item, created = OrderItem.objects.get_or_create(
-                order=order,
-                product=product,
-                defaults={"quantity": quantity, "price": product.price},
-            )
-
-            if not created:
-                # If it already exists, update the quantity
-                order_item.quantity += quantity
-                order_item.save()
-
-            return Response(
-                OrderItemSerializer(order_item).data, status=status.HTTP_201_CREATED
-            )
-
-        except ValidationError as e:
-            # Handle validation errors
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-
-class OrderItemRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
-    serializer_class = OrderItemUpdateSerializer
-    lookup_field = "id"
     permission_classes = [IsAuthenticated]
 
-    def get_queryset(self):
-        # Allow staff to access all OrderItems, and regular users can access their own
-        if self.request.user.is_staff:
-            return OrderItem.objects.all()
-        return OrderItem.objects.filter(order__customer__user=self.request.user)
+    def post(self, request, *args, **kwargs):
+        order_id = request.data.get("order_id")
+        product_id = request.data.get("product_id")
+        quantity = request.data.get("quantity", 1)
 
-    def check_order_item_permissions(self, request, order_item):
-        """Check if the user is allowed to access/modify/delete the order item."""
-        user = request.user
-        if order_item.order.customer.user != user and not user.is_staff:
-            raise PermissionDenied(
-                "You do not have permission to access this order item."
-            )
-
-    def get_object(self):
-        """
-        Retrieve the OrderItem object and check if the current user has the proper permissions.
-        """
-        order_id = self.kwargs["order_id"]
-        item_id = self.kwargs["id"]
-
-        # Get the order and order item
-        order = get_object_or_404(Order, order_id=order_id)
-        order_item = get_object_or_404(OrderItem, id=item_id, order=order)
-
-        # Check if the current user has permission to access this order item
-        self.check_order_item_permissions(self.request, order_item)
-
-        return order_item
-
-    def perform_update(self, serializer):
-        """Handle the update of an order item."""
-        order_item = self.get_object()
-
-        # Ensure that the quantity is not less than 1
-        if serializer.validated_data.get("quantity", order_item.quantity) < 1:
+        if int(quantity) < 1:
             return Response(
                 {"error": "Quantity must be at least 1."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except ValidationError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        order = get_object_or_404(Order, order_id=order_id)
+        product = get_object_or_404(Product, product_id=product_id)
+
+        if order.customer.user != request.user and not request.user.is_staff:
+            raise PermissionDenied("You do not have permission to modify this order.")
+
+        order_item, created = OrderItem.objects.get_or_create(
+            order=order,
+            product=product,
+            defaults={"quantity": quantity, "price": product.price},
+        )
+        if not created:
+            order_item.quantity += quantity
+            order_item.save()
+
+        return Response(
+            OrderItemSerializer(order_item).data, status=status.HTTP_201_CREATED
+        )
+
+
+# Order Item Retrieve, Update, and Delete View
+class OrderItemRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = OrderItemUpdateSerializer
+    permission_classes = [IsAuthenticated]
+    lookup_field = "id"
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff:
+            return OrderItem.objects.all()
+        return OrderItem.objects.filter(order__customer__user=user)
+
+    def perform_update(self, serializer):
+        order_item = self.get_object()
+        new_quantity = serializer.validated_data.get("quantity", order_item.quantity)
+        if int(new_quantity) < 1:
+            raise serializers.ValidationError("Quantity must be at least 1.")
+        serializer.save()
 
     def perform_destroy(self, instance):
-        """Handle the deletion of an order item."""
-        try:
+        if (
+            self.request.user.is_staff
+            or instance.order.customer.user == self.request.user
+        ):
             instance.delete()
-        except ValidationError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            raise PermissionDenied(
+                "You do not have permission to delete this order item."
+            )

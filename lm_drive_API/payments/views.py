@@ -1,10 +1,14 @@
-import stripe
 from django.conf import settings
+from django.shortcuts import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
-from .models import Order
+from django.utils.timezone import now
+from django.db import transaction
+from .models import Order, Payment
+from store.models import Stock
+import stripe
 
 # Set Stripe secret key from settings
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -21,13 +25,24 @@ class CreatePaymentIntentView(APIView):
         except Order.DoesNotExist:
             raise ValidationError({"order_id": "Order does not exist."})
 
-        # Get customer_id from the order
-        customer_id = order.customer.stripe_customer_id
+        # Get the customer from the order
+        customer = order.customer
 
-        if not customer_id:
-            raise ValidationError(
-                {"customer_id": "Customer does not have a Stripe customer ID."}
-            )
+        # Check if the customer has a Stripe customer ID
+        if not customer.stripe_customer_id:
+            try:
+                # Create a new Stripe customer
+                stripe_customer = stripe.Customer.create(
+                    email=customer.email,
+                    name=f"{customer.user.first_name} {customer.user.last_name}",
+                )
+                # Save the Stripe customer ID to the database
+                customer.stripe_customer_id = stripe_customer["id"]
+                customer.save()
+            except stripe.error.StripeError as e:
+                raise ValidationError(
+                    {"error": f"Error creating Stripe customer: {str(e)}"}
+                )
 
         # Get the payment method ID from the request body
         payment_method_id = request.data.get("payment_method_id")
@@ -36,45 +51,45 @@ class CreatePaymentIntentView(APIView):
                 {"payment_method_id": "Payment method ID is required."}
             )
 
-        # Retrieve the customer object from Stripe
+        # Attach payment method to the Stripe customer if not already attached
         try:
-            customer = stripe.Customer.retrieve(customer_id)
-        except stripe.error.StripeError as e:
-            raise ValidationError({"error": f"Error retrieving customer: {str(e)}"})
+            payment_methods = stripe.PaymentMethod.list(
+                customer=customer.stripe_customer_id, type="card"
+            )
 
-        # Check if the payment method is already attached to the customer
-        payment_methods = stripe.PaymentMethod.list(
-            customer=customer_id,
-            type="card",  # Assuming we're dealing with card payment methods
-        )
-
-        # If payment method is not already attached, attach it
-        if not any(pm.id == payment_method_id for pm in payment_methods.data):
-            try:
-                stripe.PaymentMethod.attach(payment_method_id, customer=customer_id)
-            except stripe.error.StripeError as e:
-                raise ValidationError(
-                    {"error": f"Error attaching payment method: {str(e)}"}
+            if not any(pm.id == payment_method_id for pm in payment_methods.data):
+                stripe.PaymentMethod.attach(
+                    payment_method_id, customer=customer.stripe_customer_id
                 )
+        except stripe.error.StripeError as e:
+            raise ValidationError(
+                {"error": f"Error attaching payment method: {str(e)}"}
+            )
 
-        # Create or confirm PaymentIntent with the associated customer and payment method
+        # Create or confirm the PaymentIntent
         try:
             payment_intent = stripe.PaymentIntent.create(
                 amount=int(order.total_amount * 100),  # Amount in cents
-                currency="eur",  # Currency in ISO format
-                customer=customer_id,  # Customer ID in Stripe
-                payment_method=payment_method_id,  # The payment method ID
-                off_session=False,  # Indicating that the payment is off-session
-                confirm=True,  # Auto-confirm the PaymentIntent
-                setup_future_usage="off_session",  # Optional: Save for future payments if needed
-                return_url="http://localhost:5173/",  # Add your return URL
+                currency="eur",
+                customer=customer.stripe_customer_id,
+                payment_method=payment_method_id,
+                off_session=False,
+                confirm=True,
+                setup_future_usage="off_session",
+                return_url="http://localhost:5173/",
             )
 
-            # Check if the payment requires further authentication (e.g., 3D Secure)
-            if (
-                payment_intent.status == "requires_action"
-                or payment_intent.status == "requires_source_action"
-            ):
+            # Save the new payment in the database with "pending" status
+            payment = Payment.objects.create(
+                order=order,
+                payment_method_id=payment_method_id,
+                amount=order.total_amount,
+                currency="eur",
+                status="pending",
+            )
+
+            # Handle PaymentIntent status
+            if payment_intent.status in ["requires_action", "requires_source_action"]:
                 return Response(
                     {
                         "client_secret": payment_intent.client_secret,
@@ -83,7 +98,13 @@ class CreatePaymentIntentView(APIView):
                     }
                 )
 
-            # If the payment is successful or does not require further action (no 3D Secure needed)
+            if payment_intent.status == "succeeded":
+                payment.status = "succeeded"
+                payment.save()
+                Payment.objects.filter(order=order, status="pending").exclude(
+                    id=payment.id
+                ).delete()
+
             return Response(
                 {
                     "client_secret": payment_intent.client_secret,
@@ -91,61 +112,104 @@ class CreatePaymentIntentView(APIView):
                     "requires_action": False,
                 }
             )
-
         except stripe.error.CardError as e:
-            # Handle card-related errors separately for better feedback
-            return Response(
-                {"error": f"Card error: {e.user_message}"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"error": f"Card error: {e.user_message}"}, status=400)
         except stripe.error.StripeError as e:
-            # Generic Stripe error handler
-            return Response(
-                {"error": f"Stripe error: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": f"Stripe error: {str(e)}"}, status=400)
 
 
-class StripeWebhookView(APIView):
+class UpdatePaymentStatusView(APIView):
     def post(self, request, *args, **kwargs):
-        # Retrieve the Stripe signature header and payload from the request
-        payload = request.body
-        sig_header = request.META.get("HTTP_STRIPE_SIGNATURE")
-        endpoint_secret = (
-            settings.STRIPE_ENDPOINT_SECRET
-        )  # Your Stripe webhook secret key
+        # Get the order ID and new status from the request body
+        order_id = request.data.get("order_id")
+        new_status = request.data.get("status")
 
-        # Verify the webhook signature to ensure it is coming from Stripe
-        try:
-            # Use Stripe's helper method to verify the signature
-            event = stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)
-        except ValueError as e:
-            # Invalid payload
-            return Response(
-                {"error": "Invalid payload"}, status=status.HTTP_400_BAD_REQUEST
-            )
-        except stripe.error.SignatureVerificationError as e:
-            # Invalid signature
-            return Response(
-                {"error": "Invalid signature"}, status=status.HTTP_400_BAD_REQUEST
+        # Validate input data
+        if not order_id or not new_status:
+            raise ValidationError({"error": "Order ID and status are required."})
+
+        if new_status not in ["succeeded", "failed"]:
+            raise ValidationError(
+                {"error": "Invalid status. Valid statuses are 'succeeded' or 'failed'."}
             )
 
-        # Now, handle the event (event['type'] gives you the event type)
-        event_type = event["type"]
-        event_data = event["data"]["object"]
+        # Retrieve the associated order
+        order = get_object_or_404(Order, order_id=order_id)
 
-        if event_type == "payment_intent.succeeded":
-            # Handle successful payment
-            payment_intent = event_data
-            # Implement your logic, e.g., update the order status to 'paid'
-            print(f"PaymentIntent {payment_intent['id']} succeeded.")
+        # Get the last payment for this order
+        last_payment = (
+            Payment.objects.filter(order=order).order_by("-created_at").first()
+        )
 
-        elif event_type == "payment_intent.payment_failed":
-            # Handle failed payment
-            payment_intent = event_data
-            # Implement your logic, e.g., notify user about the failure
-            print(f"PaymentIntent {payment_intent['id']} failed.")
+        if not last_payment:
+            raise ValidationError({"error": "No payments found for this order."})
 
-        # Add other event types here as needed (like `invoice.payment_succeeded`)
+        # Update the status of the last payment
+        last_payment.status = new_status
+        last_payment.save()
 
-        # Return a success response to Stripe to acknowledge receipt of the event
-        return Response({"status": "success"}, status=status.HTTP_200_OK)
+        # Mark the order as fulfilled if the payment succeeded
+        if new_status == "succeeded":
+            self.mark_order_as_fulfilled(order)
+            self.decrement_stock(order)
+
+        # Return a success response with the updated payment information
+        return Response(
+            {
+                "message": f"Payment status updated to {new_status} for order {order.order_id}.",
+                "payment": {
+                    "payment_id": last_payment.id,
+                    "order_id": order.order_id,
+                    "status": last_payment.status,
+                    "amount": last_payment.amount,  # Assuming 'amount' is a field in the Payment model
+                    "created_at": last_payment.created_at,
+                },
+                "order_status": order.status,  # Include updated order status
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def mark_order_as_fulfilled(self, order):
+        """Mark the order as confirmed."""
+        if order.status != "confirmed":
+            order.status = "confirmed"
+            order.fulfilled_date = now()
+            order.save(update_fields=["status", "confirmed_date", "update_date"])
+
+    def decrement_stock(self, order):
+        """
+        Decrement the stock for each product in the order.
+        Uses the store related to the order instead of the request.
+        """
+        # Retrieve the store from the order
+        store = order.store  # Accessing the store directly from the order
+        if not store:
+            raise ValidationError({"error": "Store information is missing or invalid."})
+
+        # Iterate through the items in the order
+        for (
+            order_item
+        ) in order.items.all():  # Assuming `order.items` is a related manager
+            product_id = order_item.product.product_id
+            quantity = order_item.quantity
+
+            try:
+                # Adjust stock atomically using the handle_payment_success method
+                Stock.handle_payment_success(store.store_id, product_id, quantity)
+            except ValidationError as e:
+                raise ValidationError(
+                    {
+                        "error": f"Stock adjustment failed for product '{order_item.product.product_name}': {e.messages[0]}."
+                    }
+                )
+            except Stock.DoesNotExist:
+                raise ValidationError(
+                    {
+                        "error": f"Stock entry does not exist for product '{order_item.product.product_name}' in store '{store.name}'."
+                    }
+                )
+
+        return {
+            "success": True,
+            "message": "Stock successfully decremented for the order.",
+        }
