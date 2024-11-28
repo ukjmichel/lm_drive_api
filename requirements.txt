@@ -1,5 +1,10 @@
 Django
 djangorestframework
+djangorestframework-simplejwt
 django-cors-headers
 django-filter
 pillow
+python-dotenv
+python-decouple
+requests
+stripe

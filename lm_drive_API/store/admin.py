@@ -1,5 +1,7 @@
+from django import forms
 from django.contrib import admin
 from .models import Product, Category, SubCategory, Stock, Store, Packaging, Brand
+from django.utils.html import mark_safe
 
 
 # Inline for SubCategory in Product
@@ -55,20 +57,50 @@ class BrandAdmin(admin.ModelAdmin):
     ordering = ("name",)  # Sort by brand name
 
 
-# Product Admin
+class ProductForm(forms.ModelForm):
+    class Meta:
+        model = Product
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Add image preview to the form fields
+        if self.instance and self.instance.pk:
+            if self.instance.image1:
+                self.fields["image1"].help_text = self.get_image_preview(
+                    self.instance.image1
+                )
+            if self.instance.image2:
+                self.fields["image2"].help_text = self.get_image_preview(
+                    self.instance.image2
+                )
+            if self.instance.image3:
+                self.fields["image3"].help_text = self.get_image_preview(
+                    self.instance.image3
+                )
+
+    def get_image_preview(self, image_field):
+        """Generate HTML to display the image preview."""
+        return mark_safe(f'<img src="{image_field.url}" width="150" height="150" />')
+
+
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
+    form = ProductForm  # Link the custom form to the admin
+
     list_display = (
         "product_id",
         "product_name",
         "price",
         "brand",
-        "category",  # Display the category
+        "category",
         "packaging_display",  # Display packaging as quantity x value
         "crèche_stock",  # Stock for Crêche
         "villefranche_stock",  # Stock for Villefranche
         "total_stock",  # Total stock across all stores
+        "image_thumbnail",  # Display image thumbnail
     )
+
     search_fields = ("product_name", "product_id", "brand")
     ordering = ("product_name",)
     list_filter = (
@@ -76,25 +108,38 @@ class ProductAdmin(admin.ModelAdmin):
         "category",  # Filter by category
         "subcategories",  # Filter by subcategories
     )
+
     inlines = [
         SubCategoryInline,
         StockInline,
         # Removed PackagingInline, since it's a ForeignKey relationship
     ]
 
+    def image_thumbnail(self, obj):
+        """Display the image thumbnails in the admin."""
+        images = []
+        if obj.image1:
+            images.append(f'<img src="{obj.image1.url}" width="50" height="50" />')
+        if obj.image2:
+            images.append(f'<img src="{obj.image2.url}" width="50" height="50" />')
+        if obj.image3:
+            images.append(f'<img src="{obj.image3.url}" width="50" height="50" />')
+
+        return mark_safe(" ".join(images)) if images else "No Images"
+
+    image_thumbnail.short_description = (
+        "Image Previews"  # Header for image preview column
+    )
+
     # Define stock for specific stores
     def crèche_stock(self, obj):
         """Return the stock quantity for the Crêche store."""
-        stock = obj.stocks.filter(
-            store__store_id="CRE71780"
-        ).first()  # Corrected store ID field
+        stock = obj.stocks.filter(store__store_id="CRE71780").first()
         return stock.quantity_in_stock if stock else 0
 
     def villefranche_stock(self, obj):
         """Return the stock quantity for the Villefranche store."""
-        stock = obj.stocks.filter(
-            store__store_id="VIL69400"
-        ).first()  # Corrected store ID field
+        stock = obj.stocks.filter(store__store_id="VIL69400").first()
         return stock.quantity_in_stock if stock else 0
 
     def total_stock(self, obj):
@@ -110,6 +155,7 @@ class ProductAdmin(admin.ModelAdmin):
             )
         return "N/A"
 
+    # Short descriptions for the column headers
     packaging_display.short_description = "Packaging"
     crèche_stock.short_description = "Crêche"
     villefranche_stock.short_description = "Villefranche"
