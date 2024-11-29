@@ -2,10 +2,8 @@ from django.http import Http404
 from requests import Response
 from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.pagination import PageNumberPagination
-from rest_framework import serializers
-import datetime
 from .models import Brand, Product, Category, SubCategory, Stock, Store, Packaging
 from .serializers import (
     BrandSerializer,
@@ -15,7 +13,7 @@ from .serializers import (
     StockSerializer,
 )
 from authentication.permissions import IsStaffOrReadOnly
-from django.shortcuts import get_object_or_404
+from rest_framework.generics import get_object_or_404
 from django_filters import rest_framework as filters
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q
@@ -29,7 +27,7 @@ class CategoryListCreateAPIView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         category_name = serializer.validated_data.get("name")
         if Category.objects.filter(name=category_name).exists():
-            raise ValidationError(
+            raise DRFValidationError(
                 f"Category with name '{category_name}' already exists."
             )
         serializer.save()
@@ -48,7 +46,7 @@ class CategoryRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView
             .exclude(id=category_instance.id)
             .exists()
         ):
-            raise ValidationError(
+            raise DRFValidationError(
                 f"Category with name '{category_name}' already exists."
             )
         serializer.save()
@@ -62,7 +60,7 @@ class SubCategoryListCreateAPIView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         subcategory_name = serializer.validated_data.get("name")
         if SubCategory.objects.filter(name=subcategory_name).exists():
-            raise ValidationError(
+            raise DRFValidationError(
                 f"SubCategory with name '{subcategory_name}' already exists."
             )
         serializer.save()
@@ -81,7 +79,7 @@ class SubCategoryRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIV
             .exclude(id=subcategory_instance.id)
             .exists()
         ):
-            raise ValidationError(
+            raise DRFValidationError(
                 f"SubCategory with name '{subcategory_name}' already exists."
             )
         serializer.save()
@@ -150,12 +148,12 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
         upc = serializer.validated_data.get("upc")
 
         if Product.objects.filter(product_id=product_id).exists():
-            raise ValidationError(
+            raise DRFValidationError(
                 f"Product with product_id '{product_id}' already exists."
             )
 
         if upc and Product.objects.filter(upc=upc).exists():
-            raise ValidationError(f"Product with UPC '{upc}' already exists.")
+            raise DRFValidationError(f"Product with UPC '{upc}' already exists.")
 
 
 class ProductRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
@@ -174,7 +172,7 @@ class ProductRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView)
         for field in ["image1", "image2", "image3"]:
             image = self.request.data.get(field, None)
             if image and not isinstance(image, UploadedFile):
-                raise ValidationError(f"{field} must be a valid image file.")
+                raise DRFValidationError(f"{field} must be a valid image file.")
 
     def validate_packaging(self, serializer):
         packaging_data = self.request.data.get("packaging", None)
@@ -183,7 +181,7 @@ class ProductRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView)
             packaging_value = packaging_data.get("packaging_value")
             packaging_type = packaging_data.get("packaging_type")
             if not packaging_quantity or not packaging_value or not packaging_type:
-                raise ValidationError("All packaging fields must be provided.")
+                raise DRFValidationError("All packaging fields must be provided.")
             packaging, created = Packaging.objects.get_or_create(
                 packaging_quantity=packaging_quantity,
                 packaging_value=packaging_value,
@@ -196,21 +194,21 @@ class ProductRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView)
         upc = serializer.validated_data.get("upc")
 
         if Product.objects.filter(product_id=product_id).exists():
-            raise ValidationError(
+            raise DRFValidationError(
                 f"Product with product_id '{product_id}' already exists."
             )
         if upc and Product.objects.filter(upc=upc).exists():
-            raise ValidationError(f"Product with UPC '{upc}' already exists.")
+            raise DRFValidationError(f"Product with UPC '{upc}' already exists.")
 
         product_id = serializer.validated_data.get("product_id")
         upc = serializer.validated_data.get("upc")
 
         if Product.objects.filter(product_id=product_id).exists():
-            raise ValidationError(
+            raise DRFValidationError(
                 f"Product with product_id '{product_id}' already exists."
             )
         if upc and Product.objects.filter(upc=upc).exists():
-            raise ValidationError(f"Product with UPC '{upc}' already exists.")
+            raise DRFValidationError(f"Product with UPC '{upc}' already exists.")
 
 
 class StockPagination(PageNumberPagination):
@@ -244,7 +242,7 @@ class StockListCreateAPIView(generics.ListCreateAPIView):
 
             # Check if a stock record already exists for the product and store
             if Stock.objects.filter(product=product, store=store).exists():
-                raise ValidationError(
+                raise DRFValidationError(
                     f"Stock record for product '{product.product_name}' at store '{store.name}' already exists."
                 )
 
@@ -254,12 +252,12 @@ class StockListCreateAPIView(generics.ListCreateAPIView):
         except Store.DoesNotExist:
             # Handle the case where the store doesn't exist
             raise Http404(f"Store with ID {store_id} not found.")
-        except ValidationError as e:
+        except DRFValidationError as e:
             # Handle validation error if stock already exists
-            raise e  # Re-raise ValidationError to be handled by DRF
+            raise e  # Re-raise DRFValidationError to be handled by DRF
         except Exception as e:
             # Catch any other unexpected exceptions
-            raise ValidationError(f"An error occurred while creating stock: {str(e)}")
+            raise DRFValidationError(f"An error occurred while creating stock: {str(e)}")
 
 
 class StockRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
@@ -300,7 +298,7 @@ class StockRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         try:
             serializer.is_valid(raise_exception=True)
-        except ValidationError as exc:
+        except DRFValidationError as exc:
             # Return a custom error response on validation failure
             return Response(
                 {

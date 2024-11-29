@@ -4,6 +4,7 @@ from .models import Order, OrderItem
 from authentication.models import Customer
 from store.models import Product, Store
 from store.serializers import ProductSerializer  # Assuming ProductSerializer exists
+from django.db import transaction
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
@@ -40,66 +41,101 @@ class OrderSerializer(serializers.ModelSerializer):
         fields = "__all__"
         read_only_fields = ["order_id", "order_date", "total_amount"]
 
+    def validate_store_id(self, value):
+        try:
+            return Store.objects.get(store_id=value)
+        except Store.DoesNotExist:
+            raise serializers.ValidationError("Store does not exist.")
+
+    def validate_customer_id(self, value):
+        try:
+            return Customer.objects.get(customer_id=value)
+        except Customer.DoesNotExist:
+            raise serializers.ValidationError("Customer does not exist.")
+
+    def validate_items(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Items must be a list.")
+        for item in value:
+            if not all(key in item for key in ("product_id", "quantity", "price")):
+                raise serializers.ValidationError(
+                    "Each item must contain 'product_id', 'quantity', and 'price'."
+                )
+        return value
+
     def create(self, validated_data):
         items_data = validated_data.pop("items", [])
-        store_id = validated_data.pop("store_id", None)
-        customer_id = validated_data.pop("customer_id", None)
+        store = validated_data.pop("store_id")
+        customer = validated_data.pop("customer_id")
 
-        # Fetch and validate customer
-        try:
-            customer = Customer.objects.get(customer_id=customer_id)
-        except Customer.DoesNotExist:
-            raise ValidationError({"customer_id": "Customer does not exist."})
+        # Wrap in atomic transaction
+        with transaction.atomic():
+            # Create the order
+            order = Order.objects.create(
+                customer=customer, store=store, **validated_data
+            )
 
-        # Fetch and validate store
-        try:
-            store = Store.objects.get(store_id=store_id)
-        except Store.DoesNotExist:
-            raise ValidationError({"store_id": "Store does not exist."})
+            # Add items using bulk_create
+            order_items = []
+            total_amount = 0
+            for item_data in items_data:
+                item_data["product_id"] = item_data.pop("product_id")
+                order_item = OrderItem(order=order, **item_data)
+                order_items.append(order_item)
+                total_amount += order_item.quantity * order_item.price
 
-        # Create the order
-        order = Order.objects.create(customer=customer, store=store, **validated_data)
+            OrderItem.objects.bulk_create(order_items)
 
-        # Add items to the order and calculate total amount
-        total_amount = 0
-        for item_data in items_data:
-            item_data["product_id"] = item_data.pop("product_id")
-            order_item = OrderItem.objects.create(order=order, **item_data)
-            total_amount += order_item.quantity * order_item.price
+            # Update total_amount
+            order.total_amount = total_amount
+            order.save(update_fields=["total_amount"])
 
-        # Update total amount and save the order
-        order.total_amount = total_amount
-        order.save(update_fields=["total_amount"])
-
-        return order
+            return order
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop("items", None)
+        updated_fields = {}  # Track updated fields
 
-        # Update order fields
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
+        # Wrap in atomic transaction
+        with transaction.atomic():
+            # Update order fields
+            for attr, value in validated_data.items():
+                if getattr(instance, attr) != value:  # Check if the field has changed
+                    setattr(instance, attr, value)
+                    updated_fields[attr] = value  # Track the updated field
+            instance.save()
 
-        # Update or create order items
-        if items_data is not None:
-            for item_data in items_data:
-                item_id = item_data.get("id")
-                if item_id:  # Update existing item
-                    try:
+            # Update or create order items
+            if items_data is not None:
+                current_item_ids = {
+                    item.get("id") for item in items_data if "id" in item
+                }
+                existing_items = {item.id for item in instance.items.all()}
+
+                # Delete items not in the payload
+                OrderItem.objects.filter(
+                    order=instance, id__in=existing_items - current_item_ids
+                ).delete()
+
+                for item_data in items_data:
+                    item_id = item_data.get("id")
+                    if item_id:  # Update existing item
                         order_item = OrderItem.objects.get(id=item_id, order=instance)
                         for attr, value in item_data.items():
-                            setattr(order_item, attr, value)
+                            if (
+                                getattr(order_item, attr) != value
+                            ):  # Check if the field has changed
+                                setattr(order_item, attr, value)
                         order_item.save()
-                    except OrderItem.DoesNotExist:
-                        raise ValidationError(
-                            {"id": f"OrderItem with id {item_id} not found."}
-                        )
-                else:  # Create new item
-                    item_data["product_id"] = item_data.pop("product_id")
-                    OrderItem.objects.create(order=instance, **item_data)
+                    else:  # Create new item
+                        item_data["product_id"] = item_data.pop("product_id")
+                        OrderItem.objects.create(order=instance, **item_data)
 
-        return instance
+                updated_fields["items"] = items_data  # Include updated items
+
+        # Track updated fields (for logging or debugging)
+        instance.updated_fields = updated_fields  # Temporary attribute
+        return instance  # Return the updated instance
 
 
 class OrderListSerializer(serializers.ModelSerializer):

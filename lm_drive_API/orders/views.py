@@ -1,4 +1,3 @@
-from django.forms import ValidationError
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, serializers, status
 from rest_framework.permissions import IsAuthenticated
@@ -100,7 +99,7 @@ class OrderListCreateView(generics.ListCreateAPIView):
 
 # Order Retrieve, Update, and Delete View
 class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Order.objects.all()
+    queryset = Order.objects.select_related("customer", "customer__user").all()
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
     lookup_field = "order_id"
@@ -108,29 +107,58 @@ class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
         user = self.request.user
         if user.is_staff:
-            return Order.objects.all()
-        customer = get_object_or_404(Customer, user=user)
-        return Order.objects.filter(customer=customer)
+            return Order.objects.select_related("customer", "customer__user").all()
+        return Order.objects.filter(customer__user=user).select_related("customer")
 
     def perform_update(self, serializer):
         order = self.get_object()
         new_status = serializer.validated_data.get("status")
-        if not self.request.user.is_staff:
-            if order.customer.user != self.request.user:
+        user = self.request.user
+
+        # Restrict status updates to "ready" or "fulfilled" for staff only
+        if new_status in ["ready", "fulfilled"] and not user.is_staff:
+            raise PermissionDenied(
+                {
+                    "detail": "Only staff or admin users can update the status to 'ready' or 'fulfilled'."
+                }
+            )
+
+        # Non-staff users can only update their own orders and limited statuses
+        if not user.is_staff:
+            if order.customer.user != user:
                 raise PermissionDenied(
-                    "You do not have permission to update this order."
+                    {"detail": "You do not have permission to update this order."}
                 )
-            if order.status != "pending":
-                raise PermissionDenied("Only pending orders can be updated.")
-            if new_status != "confirmed":
-                raise PermissionDenied("Only 'confirmed' status is allowed.")
-        serializer.save()
+            if order.status in ["confirmed", "ready", "fulfilled"]:
+                raise DRFValidationError(
+                    {
+                        "status": [
+                            f"You cannot update an order that is already {order.status}."
+                        ]
+                    }
+                )
+            if new_status and new_status != "confirmed":
+                raise DRFValidationError(
+                    {"status": ["Only 'confirmed' status is allowed for your role."]}
+                )
+
+        # Save the serializer to persist changes
+        updated_instance = serializer.save()
+
+        # Return the updated instance (or other details) as feedback
+        return {
+            "message": "Order updated successfully",
+            "order_id": updated_instance.order_id,
+            "status": updated_instance.status,
+        }
 
     def perform_destroy(self, instance):
-        if self.request.user.is_staff:
+        if not self.request.user.is_staff:
+            raise PermissionDenied({"detail": "Only staff can delete orders."})
+        try:
             instance.delete()
-        else:
-            raise PermissionDenied("Only staff can delete orders.")
+        except Exception as e:
+            raise DRFValidationError({"detail": f"Error deleting order: {str(e)}"})
 
 
 # Add Item to Order View

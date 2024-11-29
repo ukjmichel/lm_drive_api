@@ -70,7 +70,6 @@ class Order(models.Model):
             super().save(update_fields=["total_amount", "update_date"])
 
 
-from django.core.exceptions import ValidationError
 
 
 class OrderItem(models.Model):

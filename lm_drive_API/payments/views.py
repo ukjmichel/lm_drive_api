@@ -1,9 +1,9 @@
 from django.conf import settings
-from django.shortcuts import get_object_or_404
+from rest_framework.generics import get_object_or_404
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from django.utils.timezone import now
 from django.db import transaction
 from .models import Order, Payment
@@ -23,7 +23,7 @@ class CreatePaymentIntentView(APIView):
         try:
             order = Order.objects.get(order_id=order_id)
         except Order.DoesNotExist:
-            raise ValidationError({"order_id": "Order does not exist."})
+            raise DRFValidationError({"order_id": "Order does not exist."})
 
         # Get the customer from the order
         customer = order.customer
@@ -40,14 +40,14 @@ class CreatePaymentIntentView(APIView):
                 customer.stripe_customer_id = stripe_customer["id"]
                 customer.save()
             except stripe.error.StripeError as e:
-                raise ValidationError(
+                raise DRFValidationError(
                     {"error": f"Error creating Stripe customer: {str(e)}"}
                 )
 
         # Get the payment method ID from the request body
         payment_method_id = request.data.get("payment_method_id")
         if not payment_method_id:
-            raise ValidationError(
+            raise DRFValidationError(
                 {"payment_method_id": "Payment method ID is required."}
             )
 
@@ -62,7 +62,7 @@ class CreatePaymentIntentView(APIView):
                     payment_method_id, customer=customer.stripe_customer_id
                 )
         except stripe.error.StripeError as e:
-            raise ValidationError(
+            raise DRFValidationError(
                 {"error": f"Error attaching payment method: {str(e)}"}
             )
 
@@ -126,10 +126,10 @@ class UpdatePaymentStatusView(APIView):
 
         # Validate input data
         if not order_id or not new_status:
-            raise ValidationError({"error": "Order ID and status are required."})
+            raise DRFValidationError({"error": "Order ID and status are required."})
 
         if new_status not in ["succeeded", "failed"]:
-            raise ValidationError(
+            raise DRFValidationError(
                 {"error": "Invalid status. Valid statuses are 'succeeded' or 'failed'."}
             )
 
@@ -142,7 +142,7 @@ class UpdatePaymentStatusView(APIView):
         )
 
         if not last_payment:
-            raise ValidationError({"error": "No payments found for this order."})
+            raise DRFValidationError({"error": "No payments found for this order."})
 
         # Update the status of the last payment
         last_payment.status = new_status
@@ -184,7 +184,9 @@ class UpdatePaymentStatusView(APIView):
         # Retrieve the store from the order
         store = order.store  # Accessing the store directly from the order
         if not store:
-            raise ValidationError({"error": "Store information is missing or invalid."})
+            raise DRFValidationError(
+                {"error": "Store information is missing or invalid."}
+            )
 
         # Iterate through the items in the order
         for (
@@ -196,14 +198,14 @@ class UpdatePaymentStatusView(APIView):
             try:
                 # Adjust stock atomically using the handle_payment_success method
                 Stock.handle_payment_success(store.store_id, product_id, quantity)
-            except ValidationError as e:
-                raise ValidationError(
+            except DRFValidationError as e:
+                raise DRFValidationError(
                     {
                         "error": f"Stock adjustment failed for product '{order_item.product.product_name}': {e.messages[0]}."
                     }
                 )
             except Stock.DoesNotExist:
-                raise ValidationError(
+                raise DRFValidationError(
                     {
                         "error": f"Stock entry does not exist for product '{order_item.product.product_name}' in store '{store.name}'."
                     }
