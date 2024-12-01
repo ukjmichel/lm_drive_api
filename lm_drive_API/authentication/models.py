@@ -5,7 +5,7 @@ from django.db import transaction
 
 
 def generate_unique_customer_id():
-    """Generate a unique 10-digit customer ID."""
+    """Génère un identifiant client unique de 10 chiffres."""
     while True:
         customer_id = "".join([str(random.randint(0, 9)) for _ in range(10)])
         if not Customer.objects.filter(customer_id=customer_id).exists():
@@ -20,33 +20,37 @@ class Customer(models.Model):
         max_length=255,
         blank=True,
         null=True,
-        unique=True,  # Allow nulls for customers not yet created in Stripe
+        unique=True,  # Permet les valeurs nulles pour les clients non créés dans Stripe
     )
     user = models.OneToOneField("auth.User", on_delete=models.CASCADE)
-    email = models.EmailField(unique=True)  # Ensure email is unique
+    email = models.EmailField(unique=True)  # Garantit l'unicité de l'email
 
     def __str__(self):
         return f"{self.user.first_name} {self.user.last_name} ({self.customer_id})"
 
     def clean(self):
-        """Custom validation for the customer ID and email fields."""
-        # Validate email
+        """Validation personnalisée pour les champs ID client et email."""
+        # Validation de l'email
         if not self.email:
-            raise ValidationError("Email cannot be empty.")
+            raise ValidationError({"email": "L'adresse e-mail ne peut pas être vide."})
 
-        # Validate username length
+        # Validation de la longueur du nom d'utilisateur
         username = self.user.username
         if len(username) < 4:
-            raise ValidationError("Username must be at least 4 characters long.")
+            raise ValidationError(
+                {"user": "Le nom d'utilisateur doit contenir au moins 4 caractères."}
+            )
         if len(username) > 20:
-            raise ValidationError("Username cannot be more than 20 characters long.")
+            raise ValidationError(
+                {"user": "Le nom d'utilisateur ne peut pas dépasser 20 caractères."}
+            )
 
     class Meta:
-        verbose_name = "Customer"
-        verbose_name_plural = "Customers"
+        verbose_name = "Client"
+        verbose_name_plural = "Clients"
 
     @transaction.atomic
     def save(self, *args, **kwargs):
-        """Override save to ensure customer ID is unique and perform validation."""
-        self.full_clean()  # This calls clean() automatically
+        """Surcharge de la méthode save pour garantir l'unicité et exécuter la validation."""
+        self.full_clean()  # Appelle automatiquement la méthode clean()
         super().save(*args, **kwargs)

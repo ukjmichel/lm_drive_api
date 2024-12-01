@@ -147,6 +147,8 @@ class OrderListSerializer(serializers.ModelSerializer):
         fields = [
             "order_id",
             "order_date",
+            "confirmed_date",
+            "fulfilled_date",
             "total_amount",
             "status",
             "customer_id",

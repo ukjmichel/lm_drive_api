@@ -36,7 +36,7 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")  # Adjust the path as necessar
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-rom!ua47*6h&w4_+1rl#w(2df*a=^*g8jjt^jogxo#j59k!jn^"
+SECRET_KEY = config("SECRET_KEY", default="changeme")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     #
     "rest_framework",
     "rest_framework.authtoken",
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "django_filters",
     #
@@ -196,9 +197,22 @@ CORS_ALLOW_HEADERS = [
 
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),  # Example: 5 minutes
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),  # Example: 1 day
-    "ROTATE_REFRESH_TOKENS": True,  # Optional: to rotate tokens
+    "ACCESS_TOKEN_LIFETIME": timedelta(
+        minutes=15
+    ),  # Accès plus court pour limiter les abus
+    "REFRESH_TOKEN_LIFETIME": timedelta(
+        days=7
+    ),  # Plus long pour éviter des reconnexions fréquentes
+    "ROTATE_REFRESH_TOKENS": True,  # Régénérer un refresh token à chaque utilisation
+    "BLACKLIST_AFTER_ROTATION": True,  # Ajouter les anciens tokens à une liste noire
+    "ALGORITHM": "HS256",
+    "SIGNING_KEY": SECRET_KEY,  # Assurez-vous que votre clé est sécurisée
+    "VERIFYING_KEY": None,
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "USER_ID_FIELD": "id",
+    "USER_ID_CLAIM": "user_id",
+    "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
+    "TOKEN_TYPE_CLAIM": "token_type",
 }
 
 

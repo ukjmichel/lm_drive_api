@@ -35,6 +35,17 @@ class UserSerializer(serializers.ModelSerializer):
         user.save()  # Save the user
         return user
 
+    def update(self, instance, validated_data):
+        """
+        Met à jour un utilisateur, y compris le mot de passe s'il est fourni.
+        """
+        password = validated_data.pop("password", None)
+        instance.username = validated_data.get("username", instance.username)
+        if password:
+            instance.set_password(password)  # Hash le mot de passe
+        instance.save()  # Sauvegarde l'utilisateur
+        return instance  # Retourne l'instance mise à jour
+
 
 class CustomerSerializer(serializers.ModelSerializer):
     user = UserSerializer()  # Nested UserSerializer for user data
@@ -82,25 +93,27 @@ class CustomerSerializer(serializers.ModelSerializer):
         return customer
 
     def update(self, instance, validated_data):
-        """Update an existing customer instance"""
-        user_data = validated_data.pop("user", None)  # Extract user data, if provided
-        user = (
-            instance.user
-        )  # Get the current user instance associated with the customer
+        """
+        Met à jour un client et les données utilisateur associées.
+        """
+        user_data = validated_data.pop("user", None)
 
-        # Update the User fields if user data is provided
+        # Mise à jour des données utilisateur imbriquées
         if user_data:
-            username = user_data.get("username", user.username)
-            if "password" in user_data:
-                user.set_password(user_data["password"])  # Update password if provided
-            user.username = username  # Update username if provided
-            user.save()
+            user_instance = instance.user
+            user_serializer = UserSerializer(
+                user_instance, data=user_data, partial=True
+            )
+            user_serializer.is_valid(raise_exception=True)
+            user_serializer.save()  # Appelle la méthode update de UserSerializer
 
-        # Update the Customer fields
-        instance.email = validated_data.get("email", instance.email)
+        # Mise à jour uniquement des champs modifiés pour le client
+        for attr, value in validated_data.items():
+            if getattr(instance, attr) != value:
+                setattr(instance, attr, value)
         instance.save()
 
-        return instance
+        return instance  # Retourne l'instance mise à jour
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):

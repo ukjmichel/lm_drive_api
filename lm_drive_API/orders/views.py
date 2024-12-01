@@ -98,6 +98,13 @@ class OrderListCreateView(generics.ListCreateAPIView):
 
 
 # Order Retrieve, Update, and Delete View
+from django.utils.timezone import now
+from rest_framework.exceptions import (
+    PermissionDenied,
+    ValidationError as DRFValidationError,
+)
+
+
 class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Order.objects.select_related("customer", "customer__user").all()
     serializer_class = OrderSerializer
@@ -142,8 +149,16 @@ class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
                     {"status": ["Only 'confirmed' status is allowed for your role."]}
                 )
 
+        # Update dates based on status change
+        if new_status == "confirmed" and order.status != "confirmed":
+            serializer.save(confirmed_date=now())
+        elif new_status == "fulfilled" and order.status != "fulfilled":
+            serializer.save(fulfilled_date=now())
+        else:
+            serializer.save()
+
         # Save the serializer to persist changes
-        updated_instance = serializer.save()
+        updated_instance = serializer.instance
 
         # Return the updated instance (or other details) as feedback
         return {

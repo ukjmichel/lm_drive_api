@@ -1,5 +1,9 @@
 from rest_framework import generics, status
-from rest_framework.exceptions import NotFound, ValidationError as DRFValidationError
+from rest_framework.exceptions import (
+    NotFound,
+    ValidationError,
+    PermissionDenied as DRFValidationError,
+)
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.response import Response
@@ -81,6 +85,29 @@ class CustomerRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView
             serializer.fields.pop("stripe_customer_id", None)
 
         return serializer
+
+    def _check_permissions(self, instance):
+        """
+        Vérifie si l'utilisateur connecté a les permissions nécessaires pour modifier ou supprimer un client.
+        """
+        if not self.request.user.is_staff and instance.user != self.request.user:
+            raise PermissionDenied("Vous n'êtes pas autorisé à effectuer cette action.")
+
+    def update(self, request, *args, **kwargs):
+        """
+        Met à jour les informations du client et de l'utilisateur associé.
+        """
+        instance = self.get_object()
+        self._check_permissions(instance)  # Vérifie les permissions
+
+        partial = kwargs.pop("partial", False)
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        # Sauvegarde des données via le sérialiseur
+        serializer.save()
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
