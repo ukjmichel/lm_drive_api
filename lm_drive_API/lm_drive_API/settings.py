@@ -24,12 +24,11 @@ load_dotenv()
 STRIPE_PUBLISHABLE_KEY = config("STRIPE_PUBLISHABLE_KEY")
 STRIPE_SECRET_KEY = config("STRIPE_SECRET_KEY")
 STRIPE_TEST_SECRET_KEY = config("STRIPE_TEST_SECRET_KEY")
-STRIPE_RETURN_URL = "http://localhost:5173/"
+STRIPE_RETURN_URL = config("STRIPE_RETURN_URL", default="http://localhost:5173/")
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 MEDIA_URL = "media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")  # Adjust the path as necessar
 
@@ -40,9 +39,9 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")  # Adjust the path as necessar
 SECRET_KEY = config("SECRET_KEY", default="changeme")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = config("DEBUG", default="False")
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="127.0.0.1,localhost").split(",")
 
 
 # Application definition
@@ -105,11 +104,13 @@ WSGI_APPLICATION = "lm_drive_API.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.mysql",
-        "NAME": "laomarket",
-        "USER": "root",
-        "PASSWORD": "adminADMIN69400.",
-        "HOST": "localhost",  # Set to the host of your MySQL server
-        "PORT": "3306",  # Default MySQL port
+        "NAME": config("DATABASE_NAME", default="default_db_name"),
+        "USER": config("DATABASE_USER", default="root"),
+        "PASSWORD": config("DATABASE_PASSWORD", default=""),
+        "HOST": config(
+            "DATABASE_HOST", default="localhost"
+        ),  # Set to the host of your MySQL server
+        "PORT": config("DATABASE_PORT", default="3306"),  # Default MySQL port
     }
 }
 
@@ -173,13 +174,13 @@ REST_FRAMEWORK = {
     ),
 }
 
-CORS_ORIGIN_ALLOW_ALL = (
-    True  # Set to True if you want to allow requests from any origin
-)
+CORS_ORIGIN_ALLOW_ALL = config("CORS_ORIGIN_ALLOW_ALL", default=False, cast=bool)
 
-CORS_ORIGIN_WHITELIST = [
-    "http://127.0.0.1:5173",  # Replace with your allowed origins
-]
+
+CORS_ORIGIN_WHITELIST = config(
+    "CORS_ORIGIN_WHITELIST", default="http://127.0.0.1:5173"
+).split(",")
+
 
 CORS_ALLOW_CREDENTIALS = True  # Allow credentials (cookies, authorization headers)
 
@@ -206,22 +207,17 @@ CORS_ALLOW_HEADERS = [
 
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(
-        minutes=15
-    ),  # Accès plus court pour limiter les abus
-    "REFRESH_TOKEN_LIFETIME": timedelta(
-        days=7
-    ),  # Plus long pour éviter des reconnexions fréquentes
-    "ROTATE_REFRESH_TOKENS": True,  # Régénérer un refresh token à chaque utilisation
-    "BLACKLIST_AFTER_ROTATION": True,  # Ajouter les anciens tokens à une liste noire
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
     "ALGORITHM": "HS256",
-    "SIGNING_KEY": SECRET_KEY,  # Assurez-vous que votre clé est sécurisée
-    "VERIFYING_KEY": None,
+    "SIGNING_KEY": config("JWT_SIGNING_KEY", default=SECRET_KEY),
     "AUTH_HEADER_TYPES": ("Bearer",),
+    # Additional claims, if needed:
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "user_id",
     "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
-    "TOKEN_TYPE_CLAIM": "token_type",
 }
 
 
