@@ -19,6 +19,7 @@ from decouple import config
 # Load environment variables from .env file
 load_dotenv()
 
+
 # Stripe
 STRIPE_PUBLISHABLE_KEY = config("STRIPE_PUBLISHABLE_KEY")
 STRIPE_SECRET_KEY = config("STRIPE_SECRET_KEY")
@@ -39,7 +40,7 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")  # Adjust the path as necessar
 SECRET_KEY = config("SECRET_KEY", default="changeme")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = ["*"]
 
@@ -103,8 +104,12 @@ WSGI_APPLICATION = "lm_drive_API.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": "django.db.backends.mysql",
+        "NAME": "laomarket",
+        "USER": "root",
+        "PASSWORD": "adminADMIN69400.",
+        "HOST": "localhost",  # Set to the host of your MySQL server
+        "PORT": "3306",  # Default MySQL port
     }
 }
 
@@ -145,6 +150,10 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
 
 STATIC_URL = "static/"
+STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, "custom_static"),
+]
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
