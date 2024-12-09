@@ -145,7 +145,7 @@ class Stock(models.Model):
         Product, related_name="stocks", on_delete=models.CASCADE
     )
     quantity_in_stock = models.PositiveIntegerField(default=0)
-    expiration_date = models.DateField()
+    expiration_date = models.DateField(default=now)
 
     class Meta:
         unique_together = ("store", "product")

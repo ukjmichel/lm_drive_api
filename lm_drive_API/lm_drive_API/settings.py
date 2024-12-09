@@ -19,53 +19,51 @@ from decouple import config
 # Load environment variables from .env file
 load_dotenv()
 
-
-# Stripe
-STRIPE_PUBLISHABLE_KEY = config("STRIPE_PUBLISHABLE_KEY")
-STRIPE_SECRET_KEY = config("STRIPE_SECRET_KEY")
-STRIPE_TEST_SECRET_KEY = config("STRIPE_TEST_SECRET_KEY")
-STRIPE_RETURN_URL = config("STRIPE_RETURN_URL", default="http://localhost:5173/")
-
-
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
+# Base Directory
 BASE_DIR = Path(__file__).resolve().parent.parent
-MEDIA_URL = "media/"
-MEDIA_ROOT = os.path.join(BASE_DIR, "media")  # Adjust the path as necessar
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
-
-# SECURITY WARNING: keep the secret key used in production secret!
+# General Settings
 SECRET_KEY = config("SECRET_KEY", default="changeme")
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = config("DEBUG", default="False")
-
+DEBUG = config("DEBUG", default="False", cast=bool)
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="127.0.0.1,localhost").split(",")
+LANGUAGE_CODE = "en-us"
+TIME_ZONE = "Europe/Paris"
+USE_I18N = True
+USE_TZ = True
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+ROOT_URLCONF = config("ROOT_URLCONF", default="lm_drive_API.urls")
 
-# Application definition
+# Static & Media Files
+STATIC_URL = "/python/static/"
+STATIC_ROOT = "/usr/local/lsws/Example/html/lm_dive_api/lm_drive_API/public/static"
 
+MEDIA_URL = "media/"
+MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+
+# Installed Applications
 INSTALLED_APPS = [
+    # Default Django apps
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    #
+    # Third-party apps
     "rest_framework",
     "rest_framework.authtoken",
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "django_filters",
-    #
+    # Project-specific apps
     "authentication",
     "store",
     "orders",
     "payments",
 ]
 
+# Middleware
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -77,8 +75,7 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
 ]
 
-ROOT_URLCONF = "lm_drive_API.urls"
-
+# Templates
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -95,72 +92,32 @@ TEMPLATES = [
     },
 ]
 
+# WSGI Configuration
 WSGI_APPLICATION = "lm_drive_API.wsgi.application"
 
-
-# Database
-# https://docs.djangoproject.com/en/5.1/ref/settings/#databases
-
+# Database Configuration
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.mysql",
         "NAME": config("DATABASE_NAME", default="default_db_name"),
         "USER": config("DATABASE_USER", default="root"),
         "PASSWORD": config("DATABASE_PASSWORD", default=""),
-        "HOST": config(
-            "DATABASE_HOST", default="localhost"
-        ),  # Set to the host of your MySQL server
-        "PORT": config("DATABASE_PORT", default="3306"),  # Default MySQL port
+        "HOST": config("DATABASE_HOST", default="localhost"),
+        "PORT": config("DATABASE_PORT", default="3306"),
     }
 }
 
-
-# Password validation
-# https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators
-
-
+# Authentication & Authorization
 AUTH_PASSWORD_VALIDATORS = [
     {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
     },
-    {
-        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
-    },
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-
-# Internationalization
-# https://docs.djangoproject.com/en/5.1/topics/i18n/
-
-LANGUAGE_CODE = "en-us"
-
-TIME_ZONE = "Europe/Paris"
-
-USE_I18N = True
-
-USE_TZ = True
-
-
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.1/howto/static-files/
-
-STATIC_URL = "static/"
-STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
-STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, "custom_static"),
-]
-
-# Default primary key field type
-# https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
-
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
+# REST Framework Settings
 REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "rest_framework.views.exception_handler",
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -169,31 +126,32 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
-        "rest_framework.filters.SearchFilter",  # Optional: to enable search
-        "rest_framework.filters.OrderingFilter",  # Optional: to enable ordering
+        "rest_framework.filters.SearchFilter",
+        "rest_framework.filters.OrderingFilter",
     ),
 }
 
+# JWT Configuration
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "ALGORITHM": "HS256",
+    "SIGNING_KEY": config("JWT_SIGNING_KEY", default=SECRET_KEY),
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "USER_ID_FIELD": "id",
+    "USER_ID_CLAIM": "user_id",
+    "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
+}
+
+# CORS Configuration
 CORS_ORIGIN_ALLOW_ALL = config("CORS_ORIGIN_ALLOW_ALL", default=False, cast=bool)
-
-
 CORS_ORIGIN_WHITELIST = config(
     "CORS_ORIGIN_WHITELIST", default="http://127.0.0.1:5173"
 ).split(",")
-
-
-CORS_ALLOW_CREDENTIALS = True  # Allow credentials (cookies, authorization headers)
-
-CORS_ALLOW_METHODS = [
-    "DELETE",
-    "GET",
-    "HEAD",
-    "OPTIONS",
-    "PATCH",
-    "POST",
-    "PUT",
-]
-
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_METHODS = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
 CORS_ALLOW_HEADERS = [
     "accept",
     "accept-encoding",
@@ -205,27 +163,8 @@ CORS_ALLOW_HEADERS = [
     "x-requested-with",
 ]
 
-
-SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
-    "ROTATE_REFRESH_TOKENS": True,
-    "BLACKLIST_AFTER_ROTATION": True,
-    "ALGORITHM": "HS256",
-    "SIGNING_KEY": config("JWT_SIGNING_KEY", default=SECRET_KEY),
-    "AUTH_HEADER_TYPES": ("Bearer",),
-    # Additional claims, if needed:
-    "USER_ID_FIELD": "id",
-    "USER_ID_CLAIM": "user_id",
-    "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
-}
-
-
-# Custom JWT Payload Handler
-def jwt_payload_handler(user):
-    return {
-        "id": user.id,
-        "username": user.username,
-        "is_staff": user.is_staff,
-        "is_superuser": user.is_superuser,
-    }
+# Stripe Configuration
+STRIPE_PUBLISHABLE_KEY = config("STRIPE_PUBLISHABLE_KEY")
+STRIPE_SECRET_KEY = config("STRIPE_SECRET_KEY")
+STRIPE_TEST_SECRET_KEY = config("STRIPE_TEST_SECRET_KEY")
+STRIPE_RETURN_URL = config("STRIPE_RETURN_URL", default="http://localhost:5173/")
