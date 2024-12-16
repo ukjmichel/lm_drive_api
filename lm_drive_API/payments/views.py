@@ -69,7 +69,7 @@ class CreatePaymentIntentView(APIView):
         # Create or confirm the PaymentIntent
         try:
             payment_intent = stripe.PaymentIntent.create(
-                amount=int(order.total_amount * 100),  # Amount in cents
+                amount=int(order.total_ttc * 100),  # Amount in cents
                 currency="eur",
                 customer=customer.stripe_customer_id,
                 payment_method=payment_method_id,
@@ -83,7 +83,7 @@ class CreatePaymentIntentView(APIView):
             payment = Payment.objects.create(
                 order=order,
                 payment_method_id=payment_method_id,
-                amount=order.total_amount,
+                amount=order.total_ttc,
                 currency="eur",
                 status="pending",
             )

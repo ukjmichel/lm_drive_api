@@ -9,3 +9,5 @@ python-dotenv
 python-decouple
 requests
 stripe
+weasyprint
+mysqlclient

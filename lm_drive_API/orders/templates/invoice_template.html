@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Facture - {{ order.order_id }}</title>
+    <link rel="stylesheet" href="invoice.css" />
+  </head>
+  <body>
+    <!-- En-tête -->
+    <div class="header">
+      <h1>Facture</h1>
+      <h2>Commande n° {{ order.order_id|upper }}</h2>
+    </div>
+
+    <!-- Détails de l'entreprise -->
+    <div class="section">
+      <h3>Émetteur</h3>
+      <p><strong>Société :</strong> LAO MARKET</p>
+      <p>
+        <strong>Adresse :</strong> 9 Bd Louis Blanc, 69400
+        Villefranche-sur-Saône
+      </p>
+      <p><strong>SIRET :</strong> 90891979800011</p>
+      <p><strong>Téléphone :</strong> 09 83 97 95 80</p>
+      <p><strong>Email :</strong> contact@votreentreprise.fr</p>
+    </div>
+
+    <!-- Détails du client -->
+    <div class="section">
+      <h3>Client</h3>
+      <p><strong>ID Client :</strong> {{ order.customer.customer_id }}</p>
+      <p><strong>Email :</strong> {{ order.customer.email }}</p>
+      <p><strong>Date de commande :</strong> {{ order.confirmed_date }}</p>
+    </div>
+
+    <!-- Détails de la commande -->
+    <div class="section">
+      <h3>Détails de la commande</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Produit</th>
+            <th class="center-text">Quantité</th>
+            <th class="right-align">Prix HT</th>
+            <th class="right-align">Prix TTC</th>
+            <th class="right-align">Total HT</th>
+            <th class="center-text">TVA (%)</th>
+            <th class="right-align">Total TTC</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in order.items.all %}
+          <tr>
+            <td>{{ item.product.product_name }}</td>
+            <td class="center-text">{{ item.quantity }}</td>
+            <td class="right-align">{{ item.price_ht }} €</td>
+            <td class="right-align">{{ item.price_ttc }} €</td>
+            <td class="right-align">{{ item.total_ht }} €</td>
+            <td class="center-text">{{ item.tva }}%</td>
+            <td class="right-align">{{ item.total_ttc }} €</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Totaux -->
+    <div class="totals">
+      <p><strong>Total HT :</strong> {{ order.total_ht }} €</p>
+      <p><strong>TVA :</strong> {{ total_tva|floatformat:2 }} €</p>
+      <p><strong>Total TTC :</strong> {{ order.total_ttc }} €</p>
+    </div>
+
+    <!-- Pied de page -->
+    <div class="footer">
+      <p>Merci pour votre commande !</p>
+      <p>Facture générée le {% now "d/m/Y H:i" %}</p>
+      <p>LAO MARKET - Tous droits réservés.</p>
+    </div>
+  </body>
+</html>

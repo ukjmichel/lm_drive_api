@@ -65,12 +65,27 @@ class Packaging(models.Model):
         )
 
 
+from django.db import models
+
+
 class Product(models.Model):
     product_id = models.CharField(max_length=20, unique=True, primary_key=True)
     product_name = models.CharField(max_length=100)
-    upc = models.CharField(max_length=12, unique=True, blank=True)
-    description = models.TextField(blank=True)
-    price = models.DecimalField(max_digits=10, decimal_places=2)
+    upc = models.CharField(max_length=12, unique=True, blank=True, null=True)
+    description = models.TextField(blank=True, null=True)
+    price_ht = models.DecimalField(
+        max_digits=10, decimal_places=2, verbose_name="Prix HT"
+    )
+    tva = models.DecimalField(
+        max_digits=4,
+        decimal_places=2,
+        verbose_name="TVA (%)",
+        help_text="Enter the VAT percentage, e.g., 20 for 20%",
+    )
+    price_ttc = models.DecimalField(
+        max_digits=10, decimal_places=2, verbose_name="Prix TTC", editable=False
+    )
+    is_for_sale = models.BooleanField(default=True, verbose_name="En vente")
     brand = models.ForeignKey(
         "Brand", related_name="products", on_delete=models.SET_NULL, null=True
     )
@@ -83,11 +98,9 @@ class Product(models.Model):
     image1 = models.ImageField(upload_to="images/", blank=True, null=True)
     image2 = models.ImageField(upload_to="images/", blank=True, null=True)
     image3 = models.ImageField(upload_to="images/", blank=True, null=True)
-
-    # ForeignKey to Packaging (one-to-many relationship)
     packaging = models.ForeignKey(
-        Packaging,
-        related_name="products",  # This allows reverse access from Packaging to its products
+        "Packaging",
+        related_name="products",
         on_delete=models.CASCADE,
         null=True,
         blank=True,
@@ -96,32 +109,45 @@ class Product(models.Model):
     class Meta:
         verbose_name_plural = "Products"
 
-    def get_total_stock(self):
-        total_stock = sum(stock.quantity_in_stock for stock in self.stocks.all())
-        return total_stock
-
-    def get_stock_details(self):
-        stock_details = {}
-        for stock in self.stocks.all():
-            stock_details[stock.store.name] = stock.quantity_in_stock
-        return stock_details
-
     def __str__(self):
         return self.product_name
 
-    def get_stock_summary(self):
-        stock_summary = {
-            "total_stock": self.get_total_stock(),
-            "stock_details": {},
-        }
+    def save(self, *args, **kwargs):
+        """
+        Overriding the save method to dynamically calculate 'price_ttc'.
+        Ensures 'price_ht' and 'tva' are valid before calculating.
+        """
+        if self.price_ht is not None and self.tva is not None:
+            if self.price_ht < 0:
+                raise ValueError("Prix HT cannot be negative.")
+            if not (0 <= self.tva <= 100):
+                raise ValueError("TVA must be between 0 and 100.")
+            self.price_ttc = round(self.price_ht * (1 + self.tva / 100), 2)
+        else:
+            self.price_ttc = None  # Set to None if required fields are missing
+        super().save(*args, **kwargs)
 
-        for stock in self.stocks.all():
-            stock_summary["stock_details"][stock.store.name] = {
-                "quantity_in_stock": stock.quantity_in_stock,
+    def get_stock_summary(self):
+        """
+        Summarizes the stock across all stores for this product.
+        Returns the total quantity in stock and a list of stock by store.
+        """
+        stocks = self.stocks.all()
+        total_stock = (
+            stocks.aggregate(total=models.Sum("quantity_in_stock"))["total"] or 0
+        )
+        stock_details = [
+            {
+                "store": stock.store.name,
+                "quantity": stock.quantity_in_stock,
                 "expiration_date": stock.expiration_date,
             }
-
-        return stock_summary
+            for stock in stocks
+        ]
+        return {
+            "total_stock": total_stock,
+            "details": stock_details,
+        }
 
 
 class Store(models.Model):

@@ -32,11 +32,11 @@ USE_I18N = True
 USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-ROOT_URLCONF = config("ROOT_URLCONF", default="lm_drive_API.urls")
+ROOT_URLCONF = "lm_drive_API.urls"
 
 # Static & Media Files
 STATIC_URL = "/python/static/"
-STATIC_ROOT = "/usr/local/lsws/Example/html/lm_dive_api/lm_drive_API/public/static"
+STATIC_ROOT = "/usr/local/lsws/Example/html/lm_drive_api/lm_drive_API/public/static"
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
@@ -79,7 +79,9 @@ MIDDLEWARE = [
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [
+            BASE_DIR / "templates"
+        ],  # Ajouter le dossier 'templates' à la racine de votre projet
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -128,7 +130,9 @@ REST_FRAMEWORK = {
         "django_filters.rest_framework.DjangoFilterBackend",
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
+        
     ),
+    "COERCE_DECIMAL_TO_STRING": False,
 }
 
 # JWT Configuration

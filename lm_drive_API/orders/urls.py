@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import (
+    GenerateInvoiceView,
     OrderListCreateView,
     OrderDetailView,
     AddOrderItemView,
@@ -23,4 +24,6 @@ urlpatterns = [
         OrderItemRetrieveUpdateDestroyView.as_view(),
         name="order-item-update",
     ),
+    path('<str:order_id>/invoice/', GenerateInvoiceView.as_view(), name='generate_invoice'),
+
 ]

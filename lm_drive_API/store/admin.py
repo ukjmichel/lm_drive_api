@@ -15,7 +15,7 @@ class SubCategoryInline(admin.TabularInline):
 # Inline for Stock in Product
 class StockInline(admin.TabularInline):
     model = Stock  # Use the Stock model to display stock information
-    extra = 1  # Number of empty forms to display
+    extra = 0  # Do not display empty forms by default
     fields = (
         "store",  # Ensure store is included in the stock entry
         "quantity_in_stock",
@@ -23,6 +23,23 @@ class StockInline(admin.TabularInline):
     )
     verbose_name = "Stock Entry"
     verbose_name_plural = "Stock Entries"
+
+    def save_formset(self, request, form, formset, change):
+        """
+        Custom save logic for the Stock inline.
+        """
+        if formset.model == Stock:
+            instances = formset.save(commit=False)
+            for instance in instances:
+                if not instance.pk and not instance.quantity_in_stock:
+                    # Skip saving new stock entries with no quantity
+                    continue
+                instance.save()
+            # Handle deletions
+            for obj in formset.deleted_objects:
+                obj.delete()
+        else:
+            formset.save()
 
 
 # Packaging Inline for Product
@@ -58,13 +75,20 @@ class BrandAdmin(admin.ModelAdmin):
 
 
 class ProductForm(forms.ModelForm):
+    prix_ttc = forms.DecimalField(
+        label="Prix TTC",
+        required=False,
+        widget=forms.TextInput(attrs={"readonly": "readonly"}),
+    )
+
     class Meta:
         model = Product
         fields = "__all__"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Add image preview to the form fields
+
+        # Add image previews for existing images
         if self.instance and self.instance.pk:
             if self.instance.image1:
                 self.fields["image1"].help_text = self.get_image_preview(
@@ -79,6 +103,16 @@ class ProductForm(forms.ModelForm):
                     self.instance.image3
                 )
 
+        # Dynamically update the `prix_ttc` field based on `price_ht` and `tva`
+        if (
+            self.instance
+            and self.instance.price_ht is not None
+            and self.instance.tva is not None
+        ):
+            self.fields["prix_ttc"].initial = self.instance.price_ht * (
+                1 + self.instance.tva / 100
+            )
+
     def get_image_preview(self, image_field):
         """Generate HTML to display the image preview."""
         return mark_safe(f'<img src="{image_field.url}" width="150" height="150" />')
@@ -86,37 +120,67 @@ class ProductForm(forms.ModelForm):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    form = ProductForm  # Link the custom form to the admin
+    form = ProductForm
 
     list_display = (
         "product_id",
         "product_name",
-        "price",
+        "price_ht",
+        "tva",
+        "get_prix_ttc",  # Use a callable for Prix TTC
         "brand",
         "category",
-        "packaging_display",  # Display packaging as quantity x value
-        "crèche_stock",  # Stock for Crêche
-        "villefranche_stock",  # Stock for Villefranche
-        "total_stock",  # Total stock across all stores
-        "image_thumbnail",  # Display image thumbnail
+        "packaging_display",
+        "total_stock",
+        "image_thumbnail",
     )
 
-    search_fields = ("product_name", "product_id", "brand")
+    search_fields = ("product_name", "product_id", "brand__name")
     ordering = ("product_name",)
     list_filter = (
-        "brand",  # Filter by brand
-        "category",  # Filter by category
-        "subcategories",  # Filter by subcategories
+        "brand",
+        "category",
+        "subcategories",
     )
 
     inlines = [
         SubCategoryInline,
         StockInline,
-        # Removed PackagingInline, since it's a ForeignKey relationship
     ]
 
+    # readonly_fields = (
+    #     "get_prix_ttc",
+    # )  # Use the callable instead of assuming a DB field
+
+    def get_readonly_fields(self, request, obj=None):
+        """
+        Dynamically set readonly fields.
+        """
+        return super().get_readonly_fields(request, obj)
+
+    def save_model(self, request, obj, form, change):
+        """
+        Override save_model to update `prix_ttc` as part of the save logic.
+        """
+        # Recalculate `prix_ttc` if `price_ht` and `tva` are set
+        if obj.price_ht is not None and obj.tva is not None:
+            obj.prix_ttc = round(obj.price_ht * (1 + obj.tva / 100), 2)
+        super().save_model(request, obj, form, change)
+
+    def get_prix_ttc(self, obj):
+        """
+        Dynamically calculate `prix_ttc` for display in the admin interface.
+        """
+        if obj.price_ht is not None and obj.tva is not None:
+            return round(obj.price_ht * (1 + obj.tva / 100), 2)
+        return "N/A"  # Return a placeholder if the data is incomplete
+
+    get_prix_ttc.short_description = "Prix TTC"
+
     def image_thumbnail(self, obj):
-        """Display the image thumbnails in the admin."""
+        """
+        Display image thumbnails in the admin interface.
+        """
         images = []
         if obj.image1:
             images.append(f'<img src="{obj.image1.url}" width="50" height="50" />')
@@ -124,41 +188,28 @@ class ProductAdmin(admin.ModelAdmin):
             images.append(f'<img src="{obj.image2.url}" width="50" height="50" />')
         if obj.image3:
             images.append(f'<img src="{obj.image3.url}" width="50" height="50" />')
-
         return mark_safe(" ".join(images)) if images else "No Images"
 
-    image_thumbnail.short_description = (
-        "Image Previews"  # Header for image preview column
-    )
-
-    # Define stock for specific stores
-    def crèche_stock(self, obj):
-        """Return the stock quantity for the Crêche store."""
-        stock = obj.stocks.filter(store__store_id="CRE71780").first()
-        return stock.quantity_in_stock if stock else 0
-
-    def villefranche_stock(self, obj):
-        """Return the stock quantity for the Villefranche store."""
-        stock = obj.stocks.filter(store__store_id="VIL69400").first()
-        return stock.quantity_in_stock if stock else 0
-
-    def total_stock(self, obj):
-        """Return the total stock quantity across all stores."""
-        total = sum(stock.quantity_in_stock for stock in obj.stocks.all())
-        return total
+    image_thumbnail.short_description = "Image Previews"
 
     def packaging_display(self, obj):
-        """Return the packaging formatted as 'quantity x value'."""
-        if obj.packaging:  # Check if packaging exists (ForeignKey relation)
+        """
+        Display the packaging in the format 'quantity x value'.
+        """
+        if obj.packaging:
             return (
                 f"{obj.packaging.packaging_quantity} x {obj.packaging.packaging_value}"
             )
         return "N/A"
 
-    # Short descriptions for the column headers
     packaging_display.short_description = "Packaging"
-    crèche_stock.short_description = "Crêche"
-    villefranche_stock.short_description = "Villefranche"
+
+    def total_stock(self, obj):
+        """
+        Calculate and display total stock across all stores.
+        """
+        return sum(stock.quantity_in_stock for stock in obj.stocks.all())
+
     total_stock.short_description = "Total Stock"
 
 

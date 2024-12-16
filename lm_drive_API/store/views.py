@@ -4,6 +4,7 @@ from rest_framework import generics
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.pagination import PageNumberPagination
+from django_filters import rest_framework as filters
 from .models import Brand, Product, Category, SubCategory, Stock, Store, Packaging
 from .serializers import (
     BrandSerializer,
@@ -14,9 +15,6 @@ from .serializers import (
 )
 from authentication.permissions import IsStaffOrReadOnly
 from rest_framework.generics import get_object_or_404
-from django_filters import rest_framework as filters
-from django_filters.rest_framework import DjangoFilterBackend
-from django.db.models import Q
 
 
 class CategoryListCreateAPIView(generics.ListCreateAPIView):
@@ -107,15 +105,20 @@ class ProductFilter(filters.FilterSet):
 class ProductListCreateAPIView(generics.ListCreateAPIView):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
-    permission_classes = [IsStaffOrReadOnly]  # Adjust permission as needed
+    permission_classes = [IsStaffOrReadOnly]
     filter_backends = [filters.DjangoFilterBackend]
     filterset_class = ProductFilter
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        category_name = self.request.query_params.get("category", None)
-        subcategory_name = self.request.query_params.get("subcategory", None)
-        brand_name = self.request.query_params.get("brand", None)
+
+        # Always filter for products that are on sale
+        queryset = queryset.filter(is_for_sale=True).prefetch_related("stocks")
+
+        # Apply additional filters based on query parameters
+        category_name = self.request.query_params.get("category", "").strip()
+        subcategory_name = self.request.query_params.get("subcategory", "").strip()
+        brand_name = self.request.query_params.get("brand", "").strip()
 
         if category_name:
             queryset = queryset.filter(category__name__icontains=category_name)
@@ -126,7 +129,7 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
         if brand_name:
             queryset = queryset.filter(brand__name__icontains=brand_name)
 
-        # If user is not authenticated, exclude price by limiting fields
+        # Limit fields for unauthenticated users
         if not self.request.user.is_authenticated:
             queryset = queryset.only(
                 "product_id",
@@ -138,30 +141,25 @@ class ProductListCreateAPIView(generics.ListCreateAPIView):
                 "image3",
             )
 
-        return queryset.distinct()  # Ensure distinct results
+        return queryset.distinct()
 
-    def perform_create(self, serializer):
-        self.validate_packaging(serializer)
-        self.validate_product_uniqueness(serializer)
-        serializer.save()
-        product_id = serializer.validated_data.get("product_id")
-        upc = serializer.validated_data.get("upc")
-
-        if Product.objects.filter(product_id=product_id).exists():
-            raise DRFValidationError(
-                f"Product with product_id '{product_id}' already exists."
-            )
-
-        if upc and Product.objects.filter(upc=upc).exists():
-            raise DRFValidationError(f"Product with UPC '{upc}' already exists.")
+    def get_serializer_context(self):
+        """
+        Pass the request context to the serializer.
+        Include a flag to handle sensitive fields for unauthenticated users.
+        """
+        context = super().get_serializer_context()
+        context["include_sensitive_fields"] = self.request.user.is_authenticated
+        return context
 
 
 class ProductRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Product.objects.all()
     serializer_class = ProductSerializer
     permission_classes = [IsStaffOrReadOnly]
+    queryset = Product.objects.filter(is_for_sale=True)
 
     def perform_update(self, serializer):
+        # Perform validations before saving the updated product
         self.validate_packaging(serializer)
         self.validate_product_uniqueness(serializer)
         self.validate_images(serializer)
@@ -171,18 +169,19 @@ class ProductRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView)
         """Validate image fields for update."""
         for field in ["image1", "image2", "image3"]:
             image = self.request.data.get(field, None)
-            if image and not isinstance(image, UploadedFile):
+            if image and not getattr(image, "file", None):
                 raise DRFValidationError(f"{field} must be a valid image file.")
 
     def validate_packaging(self, serializer):
-        packaging_data = self.request.data.get("packaging", None)
+        """Validate packaging data."""
+        packaging_data = serializer.validated_data.get("packaging", None)
         if packaging_data:
             packaging_quantity = packaging_data.get("packaging_quantity")
             packaging_value = packaging_data.get("packaging_value")
             packaging_type = packaging_data.get("packaging_type")
-            if not packaging_quantity or not packaging_value or not packaging_type:
+            if not (packaging_quantity and packaging_value and packaging_type):
                 raise DRFValidationError("All packaging fields must be provided.")
-            packaging, created = Packaging.objects.get_or_create(
+            packaging, _ = Packaging.objects.get_or_create(
                 packaging_quantity=packaging_quantity,
                 packaging_value=packaging_value,
                 packaging_type=packaging_type,
@@ -190,24 +189,24 @@ class ProductRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView)
             serializer.validated_data["packaging"] = packaging
 
     def validate_product_uniqueness(self, serializer):
-        product_id = serializer.validated_data.get("product_id")
-        upc = serializer.validated_data.get("upc")
+        """Ensure product_id and UPC are unique for the updated product."""
+        product_id = serializer.validated_data.get("product_id", None)
+        upc = serializer.validated_data.get("upc", None)
+        instance = self.get_object()  # The current instance being updated
 
-        if Product.objects.filter(product_id=product_id).exists():
+        # Check for product_id uniqueness, excluding the current instance
+        if (
+            product_id
+            and Product.objects.filter(product_id=product_id)
+            .exclude(pk=instance.pk)
+            .exists()
+        ):
             raise DRFValidationError(
                 f"Product with product_id '{product_id}' already exists."
             )
-        if upc and Product.objects.filter(upc=upc).exists():
-            raise DRFValidationError(f"Product with UPC '{upc}' already exists.")
 
-        product_id = serializer.validated_data.get("product_id")
-        upc = serializer.validated_data.get("upc")
-
-        if Product.objects.filter(product_id=product_id).exists():
-            raise DRFValidationError(
-                f"Product with product_id '{product_id}' already exists."
-            )
-        if upc and Product.objects.filter(upc=upc).exists():
+        # Check for UPC uniqueness, excluding the current instance
+        if upc and Product.objects.filter(upc=upc).exclude(pk=instance.pk).exists():
             raise DRFValidationError(f"Product with UPC '{upc}' already exists.")
 
 
@@ -257,7 +256,9 @@ class StockListCreateAPIView(generics.ListCreateAPIView):
             raise e  # Re-raise DRFValidationError to be handled by DRF
         except Exception as e:
             # Catch any other unexpected exceptions
-            raise DRFValidationError(f"An error occurred while creating stock: {str(e)}")
+            raise DRFValidationError(
+                f"An error occurred while creating stock: {str(e)}"
+            )
 
 
 class StockRetrieveUpdateDestroyAPIView(generics.RetrieveUpdateDestroyAPIView):

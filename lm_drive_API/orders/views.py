@@ -1,11 +1,16 @@
+from decimal import Decimal
+import os
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
-from rest_framework import generics, serializers, status
+from rest_framework import generics, serializers, status, views
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import (
     PermissionDenied,
     ValidationError as DRFValidationError,
 )
 from rest_framework.response import Response
+
+from lm_drive_API import settings
 from .models import Order, OrderItem
 from .serializers import (
     OrderSerializer,
@@ -15,6 +20,10 @@ from .serializers import (
 )
 from authentication.models import Customer
 from store.models import Product, Store
+from django.db import transaction
+from django.template.loader import render_to_string
+from django.utils.timezone import now
+from weasyprint import HTML
 
 
 # Order List and Create View
@@ -35,78 +44,59 @@ class OrderListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         user = self.request.user
-        items = self.request.data.get("items", [])
+        items_data = self.request.data.get("items", [])
         customer_id = self.request.data.get("customer_id")
         store_id = self.request.data.get("store_id")
 
         if not customer_id or not store_id:
             raise DRFValidationError("'customer_id' and 'store_id' are required.")
 
-        try:
-            customer = Customer.objects.get(customer_id=customer_id)
-        except Customer.DoesNotExist:
-            raise DRFValidationError(f"Customer with id {customer_id} does not exist.")
+        customer = get_object_or_404(Customer, customer_id=customer_id)
+        store = get_object_or_404(Store, store_id=store_id)
 
-        try:
-            store = Store.objects.get(store_id=store_id)
-        except Store.DoesNotExist:
-            raise DRFValidationError(f"Store with id {store_id} does not exist.")
-
-        # Check if there's already a pending order for this customer
+        # Ensure only one pending order per customer
         if Order.objects.filter(customer=customer, status="pending").exists():
             raise DRFValidationError(
                 "Only one pending order can be created per customer."
             )
 
-        # Save the order first to generate the order_id
-        order = serializer.save(customer=customer, store=store)
+        with transaction.atomic():
+            order = serializer.save(customer=customer, store=store)
+            total_ht, total_ttc = 0, 0
 
-        total_amount = 0
-        for item in items:
-            product_id = item.get("product_id")
-            quantity = item.get("quantity", 1)
+            for item_data in items_data:
+                product = get_object_or_404(Product, product_id=item_data["product_id"])
+                quantity = int(item_data.get("quantity", 1))
+                if quantity < 1:
+                    raise DRFValidationError("Quantity must be at least 1.")
 
-            if int(quantity) < 1:
-                raise DRFValidationError("Quantity must be at least 1.")
+                price_ht = product.price_ht
+                tva = product.tva
+                price_ttc = round(price_ht * (1 + tva / 100), 2)
+                total_ht += price_ht * quantity
+                total_ttc += price_ttc * quantity
 
-            try:
-                product = Product.objects.get(product_id=product_id)
-            except Product.DoesNotExist:
-                raise DRFValidationError(
-                    f"Product with id {product_id} does not exist."
+                OrderItem.objects.create(
+                    order=order,
+                    product=product,
+                    price_ht=price_ht,
+                    tva=tva,
+                    price_ttc=price_ttc,
+                    quantity=quantity,
+                    total_ht=price_ht * quantity,
+                    total_ttc=price_ttc * quantity,
                 )
 
-            price = product.price
-            total_price = price * int(quantity)
-
-            # Create the order item
-            OrderItem.objects.create(
-                order=order,
-                product=product,
-                price=price,
-                quantity=quantity,
-                total=total_price,
-            )
-
-            total_amount += total_price
-
-        # Update the order's total amount after all items are added
-        order.total_amount = total_amount
-        order.save()
-
-        return Response(OrderSerializer(order).data, status=status.HTTP_201_CREATED)
-
-
-# Order Retrieve, Update, and Delete View
-from django.utils.timezone import now
-from rest_framework.exceptions import (
-    PermissionDenied,
-    ValidationError as DRFValidationError,
-)
+            # Update order totals
+            order.total_ht = total_ht
+            order.total_ttc = total_ttc
+            order.save()
 
 
 class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Order.objects.select_related("customer", "customer__user").all()
+    queryset = Order.objects.select_related("customer", "store").prefetch_related(
+        "items"
+    )
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
     lookup_field = "order_id"
@@ -114,66 +104,35 @@ class OrderDetailView(generics.RetrieveUpdateDestroyAPIView):
     def get_queryset(self):
         user = self.request.user
         if user.is_staff:
-            return Order.objects.select_related("customer", "customer__user").all()
-        return Order.objects.filter(customer__user=user).select_related("customer")
+            return Order.objects.all()
+        return Order.objects.filter(customer__user=user)
 
     def perform_update(self, serializer):
         order = self.get_object()
         new_status = serializer.validated_data.get("status")
         user = self.request.user
 
-        # Restrict status updates to "ready" or "fulfilled" for staff only
-        if new_status in ["ready", "fulfilled"] and not user.is_staff:
-            raise PermissionDenied(
-                {
-                    "detail": "Only staff or admin users can update the status to 'ready' or 'fulfilled'."
-                }
-            )
-
-        # Non-staff users can only update their own orders and limited statuses
+        # Restrict non-staff users from updating certain statuses
         if not user.is_staff:
             if order.customer.user != user:
                 raise PermissionDenied(
-                    {"detail": "You do not have permission to update this order."}
+                    "You do not have permission to update this order."
                 )
             if order.status in ["confirmed", "ready", "fulfilled"]:
-                raise DRFValidationError(
-                    {
-                        "status": [
-                            f"You cannot update an order that is already {order.status}."
-                        ]
-                    }
-                )
-            if new_status and new_status != "confirmed":
-                raise DRFValidationError(
-                    {"status": ["Only 'confirmed' status is allowed for your role."]}
-                )
+                raise DRFValidationError("You cannot update an order with this status.")
 
-        # Update dates based on status change
-        if new_status == "confirmed" and order.status != "confirmed":
-            serializer.save(confirmed_date=now())
-        elif new_status == "fulfilled" and order.status != "fulfilled":
-            serializer.save(fulfilled_date=now())
-        else:
-            serializer.save()
-
-        # Save the serializer to persist changes
-        updated_instance = serializer.instance
-
-        # Return the updated instance (or other details) as feedback
-        return {
-            "message": "Order updated successfully",
-            "order_id": updated_instance.order_id,
-            "status": updated_instance.status,
-        }
+        with transaction.atomic():
+            if new_status == "confirmed" and order.status != "confirmed":
+                serializer.save(confirmed_date=now())
+            elif new_status == "fulfilled" and order.status != "fulfilled":
+                serializer.save(fulfilled_date=now())
+            else:
+                serializer.save()
 
     def perform_destroy(self, instance):
         if not self.request.user.is_staff:
-            raise PermissionDenied({"detail": "Only staff can delete orders."})
-        try:
-            instance.delete()
-        except Exception as e:
-            raise DRFValidationError({"detail": f"Error deleting order: {str(e)}"})
+            raise PermissionDenied("Only staff can delete orders.")
+        instance.delete()
 
 
 # Add Item to Order View
@@ -201,7 +160,7 @@ class AddOrderItemView(generics.CreateAPIView):
         order_item, created = OrderItem.objects.get_or_create(
             order=order,
             product=product,
-            defaults={"quantity": quantity, "price": product.price},
+            defaults={"quantity": quantity, "price_ttc": product.price_ttc},
         )
         if not created:
             order_item.quantity += quantity
@@ -241,3 +200,56 @@ class OrderItemRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
             raise PermissionDenied(
                 "You do not have permission to delete this order item."
             )
+
+
+class GenerateInvoiceView(views.APIView):
+    permission_classes = [IsAuthenticated]  # Ensure only authenticated users can access this view.
+
+    def get(self, request, order_id):
+        # Récupérer la commande
+        order = get_object_or_404(Order, order_id=order_id)
+
+        # Calculer la TVA
+        total_tva = Decimal(order.total_ttc) - Decimal(order.total_ht)
+
+        # Rendre le contenu HTML
+        try:
+            html_content = render_to_string(
+                "invoice_template.html",
+                {
+                    "order": order,
+                    "total_tva": total_tva,  # Passer la TVA au template
+                    "now": now(), 
+                },
+            )
+        except Exception as e:
+            return Response(
+                {"error": f"Error rendering invoice template: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # Localiser le fichier CSS
+        css_path = os.path.join(settings.BASE_DIR, "orders/templates/invoice.css")
+        if not os.path.exists(css_path):
+            return Response(
+                {"error": f"CSS file not found: {css_path}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # Générer le PDF avec le CSS
+        try:
+            pdf = HTML(string=html_content).write_pdf(stylesheets=[css_path])
+        except Exception as e:
+            return Response(
+                {"error": f"Error generating PDF: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # Retourner la réponse
+        response = HttpResponse(pdf, content_type="application/pdf")
+        response["Content-Disposition"] = (
+            f'attachment; filename="facture_{order.order_id}.pdf"'
+        )
+        return response
+
+

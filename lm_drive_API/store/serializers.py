@@ -47,13 +47,13 @@ class BaseCategorySerializer(serializers.ModelSerializer):
 class CategorySerializer(BaseCategorySerializer):
     class Meta:
         model = Category
-        fields = ["id", "name"]
+        fields = ["name"]
 
 
 class SubCategorySerializer(BaseCategorySerializer):
     class Meta:
         model = SubCategory
-        fields = ["id", "name"]
+        fields = ["name"]
 
 
 class BrandSerializer(serializers.ModelSerializer):
@@ -75,12 +75,16 @@ class PackagingSerializer(serializers.ModelSerializer):
 class ProductSerializer(serializers.ModelSerializer):
     brand = serializers.SlugRelatedField(
         queryset=Brand.objects.all(),
-        slug_field="name",  # This will display the brand's name instead of ID
+        slug_field="name",
     )
     category = CategorySerializer()
     subcategories = SubCategorySerializer(many=True)
     stock_summary = serializers.SerializerMethodField()
+    stocks = serializers.SerializerMethodField()
     packaging = PackagingSerializer()
+    price_ttc = serializers.DecimalField(
+        max_digits=10, decimal_places=2, read_only=True
+    )
 
     class Meta:
         model = Product
@@ -89,7 +93,10 @@ class ProductSerializer(serializers.ModelSerializer):
             "product_name",
             "upc",
             "description",
-            "price",
+            "price_ht",
+            "tva",
+            "price_ttc",
+            "is_for_sale",
             "brand",
             "category",
             "subcategories",
@@ -98,31 +105,51 @@ class ProductSerializer(serializers.ModelSerializer):
             "image3",
             "packaging",
             "stock_summary",
+            "stocks",
         ]
 
-    def get_stock_summary(self, obj):
-        """Retrieve the stock summary for a product."""
-        return obj.get_stock_summary()
-
     def to_representation(self, instance):
-        """Customize representation for authenticated users."""
+        """
+        Customize representation to exclude sensitive fields for unauthenticated users.
+        """
         representation = super().to_representation(instance)
         request = self.context.get("request")
 
-        # Include stock summary and price for authenticated users only
-        if request and request.user.is_authenticated:
-            representation["stock_summary"] = self.get_stock_summary(instance)
-            representation["price"] = instance.price
-        else:
-            representation.pop("stock_summary", None)
-            representation.pop("price", None)
+        # Exclude sensitive fields for unauthenticated users
+        if not (request and request.user.is_authenticated):
+            representation.pop("price_ht", None)
+            representation.pop("tva", None)
+            representation.pop("price_ttc", None)
 
         # Add absolute URLs for images
         representation["image_urls"] = self.get_image_urls(instance)
+
         return representation
 
+    def get_stock_summary(self, obj):
+        """
+        Retrieve the stock summary for a product.
+        """
+        return obj.get_stock_summary()
+
+    def get_stocks(self, obj):
+        """
+        Fetch stock information for the product in a simplified format.
+        """
+        stock_queryset = obj.stocks.select_related("store")
+        return [
+            {
+                "store": stock.store.store_id,
+                "quantity": stock.quantity_in_stock,
+                "expiration_date": stock.expiration_date,
+            }
+            for stock in stock_queryset
+        ]
+
     def get_image_urls(self, obj):
-        """Return the absolute URLs for all product images."""
+        """
+        Generate absolute URLs for product images.
+        """
         request = self.context.get("request")
         image_urls = {}
         if request:
@@ -135,46 +162,48 @@ class ProductSerializer(serializers.ModelSerializer):
         return image_urls
 
     def create(self, validated_data):
-        """Create a new product."""
+        """
+        Create a new product with nested relationships.
+        """
         packaging_data = validated_data.pop("packaging", None)
-        product_id = validated_data.get("product_id")
-        upc = validated_data.get("upc")
-
-        # Check for existing product
-        if Product.objects.filter(product_id=product_id).exists():
-            raise serializers.ValidationError(
-                f"Product with product_id '{product_id}' already exists."
-            )
-        if Product.objects.filter(upc=upc).exists():
-            raise serializers.ValidationError(
-                f"Product with UPC '{upc}' already exists."
-            )
-
         category_data = validated_data.pop("category")
+        subcategories_data = validated_data.pop("subcategories", [])
+
+        # Handle category
         category, _ = Category.objects.get_or_create(name=category_data["name"])
 
-        subcategories_data = validated_data.pop("subcategories", [])
+        # Handle subcategories
         subcategory_objs = [
-            SubCategory.objects.get_or_create(name=subcategory_data["name"])[0]
-            for subcategory_data in subcategories_data
+            SubCategory.objects.get_or_create(name=data["name"])[0]
+            for data in subcategories_data
         ]
 
+        # Handle packaging
         packaging = None
         if packaging_data:
             packaging, _ = Packaging.objects.get_or_create(
-                packaging_quantity=packaging_data.get("packaging_quantity"),
-                packaging_value=packaging_data.get("packaging_value"),
-                packaging_type=packaging_data.get("packaging_type"),
+                packaging_quantity=packaging_data["packaging_quantity"],
+                packaging_value=packaging_data["packaging_value"],
+                packaging_type=packaging_data["packaging_type"],
             )
 
+        # Create product
         product = Product.objects.create(
             category=category, packaging=packaging, **validated_data
         )
         product.subcategories.set(subcategory_objs)
+
         return product
 
-        """Update an existing product."""
+    def update(self, instance, validated_data):
+        """
+        Update an existing product with nested relationships.
+        """
         packaging_data = validated_data.pop("packaging", None)
+        category_data = validated_data.pop("category", None)
+        subcategories_data = validated_data.pop("subcategories", [])
+
+        # Handle packaging
         if packaging_data:
             packaging, _ = Packaging.objects.get_or_create(
                 packaging_quantity=packaging_data["packaging_quantity"],
@@ -183,19 +212,20 @@ class ProductSerializer(serializers.ModelSerializer):
             )
             instance.packaging = packaging
 
-        category_data = validated_data.pop("category", None)
+        # Handle category
         if category_data:
             category, _ = Category.objects.get_or_create(name=category_data["name"])
             instance.category = category
 
-        subcategories_data = validated_data.pop("subcategories", [])
+        # Handle subcategories
         if subcategories_data:
             subcategory_objs = [
-                SubCategory.objects.get_or_create(name=subcategory_data["name"])[0]
-                for subcategory_data in subcategories_data
+                SubCategory.objects.get_or_create(name=data["name"])[0]
+                for data in subcategories_data
             ]
             instance.subcategories.set(subcategory_objs)
 
+        # Update fields
         for key, value in validated_data.items():
             setattr(instance, key, value)
 
